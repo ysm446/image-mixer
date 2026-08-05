@@ -43,6 +43,10 @@ export interface GeneratedImage extends ImageAsset {
   promptId: string
   seed: number
 }
+export interface CopiedSessionAsset {
+  sourcePath: string
+  destinationPath: string
+}
 
 export interface LibraryInfo {
   rootPath: string

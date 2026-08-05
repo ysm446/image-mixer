@@ -11,6 +11,7 @@ const api: ImageMixerApi = {
   duplicateSession: (sessionId) => ipcRenderer.invoke('session:duplicate', sessionId),
   loadSession: (sessionId) => ipcRenderer.invoke('session:load', sessionId),
   saveSession: (sessionId, snapshot: SessionSnapshot) => ipcRenderer.invoke('session:save', sessionId, snapshot),
+  copySessionAssets: (sourceSessionId, targetSessionId, sourcePaths) => ipcRenderer.invoke('session:copy-assets', sourceSessionId, targetSessionId, sourcePaths),
   deleteSession: (sessionId) => ipcRenderer.invoke('session:delete', sessionId),
   chooseImage: (sessionId) => ipcRenderer.invoke('image:choose', sessionId),
   importDroppedImage: (file, sessionId) => {
@@ -22,6 +23,8 @@ const api: ImageMixerApi = {
   cancelGeneration: (sessionId, nodeId) => ipcRenderer.invoke('image:cancel-generation', sessionId, nodeId),
   copyImage: (sourcePath) => ipcRenderer.invoke('image:copy', sourcePath),
   saveImageCopy: (sourcePath) => ipcRenderer.invoke('image:save-copy', sourcePath),
+  captureScreenshot: () => ipcRenderer.invoke('screenshot:capture'),
+  revealScreenshot: (sourcePath) => ipcRenderer.invoke('screenshot:reveal', sourcePath),
   onComfyStatus: (callback) => {
     const listener = (_event: IpcRendererEvent, status: ComfyStatus): void => callback(status)
     ipcRenderer.on('comfy:status-changed', listener)

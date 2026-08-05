@@ -24,6 +24,16 @@ import { SystemResourceMonitor } from './SystemResourceMonitor'
 
 type RenderState = 'idle' | 'running' | 'succeeded' | 'failed' | 'canceled'
 
+const MIN_IMAGE_DIMENSION = 64
+const MAX_IMAGE_DIMENSION = 4096
+const IMAGE_DIMENSION_STEP = 8
+
+function normalizeImageDimension(value: number): number {
+  if (!Number.isFinite(value)) return MIN_IMAGE_DIMENSION
+  const rounded = Math.round(value / IMAGE_DIMENSION_STEP) * IMAGE_DIMENSION_STEP
+  return Math.min(MAX_IMAGE_DIMENSION, Math.max(MIN_IMAGE_DIMENSION, rounded))
+}
+
 type PromptData = {
   kind: 'prompt'
   title: string
@@ -191,7 +201,8 @@ function NumberField({
   max,
   step,
   onChange,
-  onRandomize
+  onRandomize,
+  normalize
 }: {
   label: string
   value: number
@@ -200,6 +211,7 @@ function NumberField({
   step: number
   onChange: (value: number) => void
   onRandomize?: () => void
+  normalize?: (value: number) => number
 }): React.JSX.Element {
   return (
     <div className='setting-field'>
@@ -214,6 +226,11 @@ function NumberField({
           step={step}
           aria-label={label}
           onChange={(event) => onChange(Number(event.target.value))}
+          onBlur={() => {
+            if (!normalize) return
+            const normalized = normalize(value)
+            if (normalized !== value) onChange(normalized)
+          }}
         />
         {onRandomize && (
           <button type='button' className='setting-random-button nodrag' title='Seedをランダム化' aria-label='Seedをランダム化' onClick={onRandomize}>
@@ -290,8 +307,8 @@ function GenerateNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.
 
       <div className='settings-grid'>
         <div className='size-settings-row'>
-          <NumberField label='Width' value={generateData.settings.width} min={64} max={4096} step={8} onChange={(value) => setSetting('width', value)} />
-          <NumberField label='Height' value={generateData.settings.height} min={64} max={4096} step={8} onChange={(value) => setSetting('height', value)} />
+          <NumberField label='Width' value={generateData.settings.width} min={MIN_IMAGE_DIMENSION} max={MAX_IMAGE_DIMENSION} step={IMAGE_DIMENSION_STEP} normalize={normalizeImageDimension} onChange={(value) => setSetting('width', value)} />
+          <NumberField label='Height' value={generateData.settings.height} min={MIN_IMAGE_DIMENSION} max={MAX_IMAGE_DIMENSION} step={IMAGE_DIMENSION_STEP} normalize={normalizeImageDimension} onChange={(value) => setSetting('height', value)} />
           <button
             type='button'
             className='match-size-button nodrag'
@@ -457,6 +474,7 @@ function Editor(): React.JSX.Element {
   const [renameDraft, setRenameDraft] = useState('')
   const [renameSaving, setRenameSaving] = useState(false)
   const [previewImage, setPreviewImage] = useState<GeneratedImage | null>(null)
+  const [screenshotNotice, setScreenshotNotice] = useState<string | null>(null)
   const [nodeContextMenu, setNodeContextMenu] = useState<{
     left: number
     top: number
@@ -466,8 +484,10 @@ function Editor(): React.JSX.Element {
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const renameCommitPending = useRef(false)
   const nodeClipboard = useRef<NodeClipboard | null>(null)
+  const activeSessionIdRef = useRef<string | null>(null)
   const canvasRef = useRef<HTMLElement | null>(null)
   const canceledGenerationIds = useRef(new Set<string>())
+  activeSessionIdRef.current = activeSession?.id ?? null
 
   useEffect(() => {
     void window.imageMixer.getComfyStatus().then(setComfy)
@@ -482,6 +502,38 @@ function Editor(): React.JSX.Element {
     window.addEventListener('pointerdown', closeMenus)
     return () => window.removeEventListener('pointerdown', closeMenus)
   }, [])
+
+  useEffect(() => {
+    const captureScreenshot = (event: KeyboardEvent): void => {
+      if (event.key !== 'F12' || event.repeat) return
+      event.preventDefault()
+      event.stopPropagation()
+      void window.imageMixer.captureScreenshot()
+        .then((sourcePath) => {
+          setSidebarError(null)
+          setScreenshotNotice(sourcePath)
+        })
+        .catch((error: unknown) => setSidebarError(error instanceof Error ? error.message : String(error)))
+    }
+    window.addEventListener('keydown', captureScreenshot, true)
+    return () => window.removeEventListener('keydown', captureScreenshot, true)
+  }, [])
+
+  useEffect(() => {
+    if (!screenshotNotice) return
+    const timer = window.setTimeout(() => setScreenshotNotice(null), 6000)
+    return () => window.clearTimeout(timer)
+  }, [screenshotNotice])
+
+  const openScreenshotFolder = useCallback(async () => {
+    if (!screenshotNotice) return
+    try {
+      await window.imageMixer.revealScreenshot(screenshotNotice)
+      setScreenshotNotice(null)
+    } catch (error) {
+      setSidebarError(error instanceof Error ? error.message : String(error))
+    }
+  }, [screenshotNotice])
 
   useEffect(() => {
     const handleCanvasShortcut = (event: KeyboardEvent): void => {
@@ -579,9 +631,9 @@ function Editor(): React.JSX.Element {
       updateNode(nodeId, { error: 'Image 1へ解像度を取得できる画像を接続してください。' })
       return
     }
-    const scale = Math.min(1, 4096 / image.width, 4096 / image.height)
-    const width = Math.max(64, Math.round((image.width * scale) / 8) * 8)
-    const height = Math.max(64, Math.round((image.height * scale) / 8) * 8)
+    const scale = Math.min(1, MAX_IMAGE_DIMENSION / image.width, MAX_IMAGE_DIMENSION / image.height)
+    const width = normalizeImageDimension(image.width * scale)
+    const height = normalizeImageDimension(image.height * scale)
     updateNode(nodeId, { settings: { ...target.data.settings, width, height }, error: null })
   }, [edges, nodes, updateNode])
 
@@ -614,11 +666,20 @@ function Editor(): React.JSX.Element {
       return
     }
 
+    const settings = {
+      ...target.data.settings,
+      width: normalizeImageDimension(target.data.settings.width),
+      height: normalizeImageDimension(target.data.settings.height)
+    }
+    if (settings.width !== target.data.settings.width || settings.height !== target.data.settings.height) {
+      updateNode(nodeId, { settings })
+    }
+
     const startedAtMs = Date.now()
     canceledGenerationIds.current.delete(nodeId)
     updateNode(nodeId, { state: 'running', error: null, durationMs: 0, startedAtMs })
     try {
-      const result = await window.imageMixer.generateImage({ nodeId, sessionId: activeSession.id, prompt, imagePaths, settings: target.data.settings })
+      const result = await window.imageMixer.generateImage({ nodeId, sessionId: activeSession.id, prompt, imagePaths, settings })
       updateNode(nodeId, { state: 'succeeded', result, error: null, durationMs: Date.now() - startedAtMs, startedAtMs: null })
     } catch (error) {
       const wasCanceled = canceledGenerationIds.current.delete(nodeId)
@@ -699,44 +760,78 @@ function Editor(): React.JSX.Element {
     return true
   }, [activeSession, edges, nodes])
 
-  const pasteSelectedNodes = useCallback((): boolean => {
+  const pasteSelectedNodes = useCallback(async (): Promise<boolean> => {
     const clipboard = nodeClipboard.current
     if (!clipboard || !activeSession) return false
-    if (clipboard.sessionId !== activeSession.id) {
-      setSidebarError('ノードはコピー元と同じセッション内で貼り付けてください。')
-      return false
-    }
     const canvas = canvasRef.current
     if (!canvas) return false
-    const canvasRect = canvas.getBoundingClientRect()
-    const viewportCenter = screenToFlowPosition({
-      x: canvasRect.left + canvasRect.width / 2,
-      y: canvasRect.top + canvasRect.height / 2
-    })
-    clipboard.pasteCount += 1
-    const cascadeOffset = 24 * (clipboard.pasteCount - 1)
-    const offset = {
-      x: viewportCenter.x - clipboard.boundsCenter.x + cascadeOffset,
-      y: viewportCenter.y - clipboard.boundsCenter.y + cascadeOffset
+
+    const targetSessionId = activeSession.id
+    try {
+      const assetPathMap = new Map<string, string>()
+      const isCrossSessionPaste = clipboard.sessionId !== targetSessionId
+      if (isCrossSessionPaste) {
+        const sourcePaths = clipboard.nodes.flatMap((node) => {
+          if (node.data.kind === 'image' && node.data.image) return [node.data.image.path]
+          if (node.data.kind === 'generate' && node.data.result) return [node.data.result.path]
+          return []
+        })
+        const copiedAssets = await window.imageMixer.copySessionAssets(clipboard.sessionId, targetSessionId, sourcePaths)
+        for (const asset of copiedAssets) assetPathMap.set(asset.sourcePath, asset.destinationPath)
+        if (activeSessionIdRef.current !== targetSessionId) throw new Error('貼り付け先のセッションが切り替わりました。もう一度貼り付けてください。')
+      }
+
+      const canvasRect = canvas.getBoundingClientRect()
+      const viewportCenter = screenToFlowPosition({
+        x: canvasRect.left + canvasRect.width / 2,
+        y: canvasRect.top + canvasRect.height / 2
+      })
+      clipboard.pasteCount += 1
+      const cascadeOffset = 24 * (clipboard.pasteCount - 1)
+      const offset = {
+        x: viewportCenter.x - clipboard.boundsCenter.x + cascadeOffset,
+        y: viewportCenter.y - clipboard.boundsCenter.y + cascadeOffset
+      }
+      const idMap = new Map(clipboard.nodes.map((node) => [node.id, `${node.data.kind}-${crypto.randomUUID()}`]))
+      const pastedNodes: EditorNode[] = clipboard.nodes.map((node) => {
+        const pasted = {
+          ...structuredClone(node),
+          id: idMap.get(node.id)!,
+          position: { x: node.position.x + offset.x, y: node.position.y + offset.y },
+          selected: true
+        } as EditorNode
+        if (isCrossSessionPaste) {
+          const rebaseAsset = (asset: ImageAsset | GeneratedImage | null): void => {
+            if (!asset) return
+            const destinationPath = assetPathMap.get(asset.path)
+            if (!destinationPath) throw new Error('コピーした画像の保存先を解決できませんでした。')
+            asset.path = destinationPath
+          }
+          if (pasted.data.kind === 'image') rebaseAsset(pasted.data.image)
+          if (pasted.data.kind === 'generate') rebaseAsset(pasted.data.result)
+        }
+        if (pasted.data.kind === 'generate' && pasted.data.state === 'running') {
+          pasted.data.state = 'canceled'
+          pasted.data.error = null
+          pasted.data.startedAtMs = null
+        }
+        return pasted
+      })
+      const pastedEdges: EditorEdge[] = clipboard.edges.map((edge) => ({
+        ...structuredClone(edge),
+        id: crypto.randomUUID(),
+        source: idMap.get(edge.source)!,
+        target: idMap.get(edge.target)!,
+        selected: false
+      }))
+      setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...pastedNodes])
+      setEdges((current) => [...current.map((edge) => ({ ...edge, selected: false })), ...pastedEdges])
+      setSidebarError(null)
+      return true
+    } catch (error) {
+      setSidebarError(`ノードを貼り付けられませんでした: ${error instanceof Error ? error.message : String(error)}`)
+      return false
     }
-    const idMap = new Map(clipboard.nodes.map((node) => [node.id, `${node.data.kind}-${crypto.randomUUID()}`]))
-    const pastedNodes: EditorNode[] = clipboard.nodes.map((node) => ({
-      ...structuredClone(node),
-      id: idMap.get(node.id)!,
-      position: { x: node.position.x + offset.x, y: node.position.y + offset.y },
-      selected: true
-    }))
-    const pastedEdges: EditorEdge[] = clipboard.edges.map((edge) => ({
-      ...structuredClone(edge),
-      id: crypto.randomUUID(),
-      source: idMap.get(edge.source)!,
-      target: idMap.get(edge.target)!,
-      selected: false
-    }))
-    setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...pastedNodes])
-    setEdges((current) => [...current.map((edge) => ({ ...edge, selected: false })), ...pastedEdges])
-    setSidebarError(null)
-    return true
   }, [activeSession, screenToFlowPosition, setEdges, setNodes])
 
   useEffect(() => {
@@ -750,7 +845,7 @@ function Editor(): React.JSX.Element {
       } else if (key === 'v' && !event.repeat) {
         if (!nodeClipboard.current) return
         event.preventDefault()
-        pasteSelectedNodes()
+        void pasteSelectedNodes()
       }
     }
     window.addEventListener('keydown', handleClipboardShortcut)
@@ -1131,6 +1226,19 @@ function Editor(): React.JSX.Element {
             <button type='button' onClick={() => addNodeFromContextMenu('prompt')}><span className='node-type-dot prompt' />Prompt</button>
             <button type='button' onClick={() => addNodeFromContextMenu('image')}><span className='node-type-dot image' />Image</button>
             <button type='button' onClick={() => addNodeFromContextMenu('generate')}><span className='node-type-dot generate' />Generate</button>
+          </div>
+        )}
+        {screenshotNotice && (
+          <div className='screenshot-toast' role='status' aria-live='polite'>
+            <button type='button' className='screenshot-toast-main' onClick={() => void openScreenshotFolder()}>
+              <span className='screenshot-toast-icon' aria-hidden='true'>✓</span>
+              <span className='screenshot-toast-copy'>
+                <strong>スクリーンショットを保存しました</strong>
+                <small>{screenshotNotice.split(/[\\/]/).pop()}</small>
+                <span>クリックしてフォルダを開く</span>
+              </span>
+            </button>
+            <button type='button' className='screenshot-toast-close' aria-label='通知を閉じる' onClick={() => setScreenshotNotice(null)}>×</button>
           </div>
         )}
         {previewImage && (

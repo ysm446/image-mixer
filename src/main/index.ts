@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, shell } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { copyFile, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
@@ -6,7 +6,7 @@ import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import * as os from 'node:os'
 import sharp from 'sharp'
-import type { ComfyStatus, GenerateRequest, GeneratedImage, ImageAsset, LibraryBootstrap, LibraryInfo, SessionRecord, SessionSnapshot, SystemResources } from './types'
+import type { ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, ImageAsset, LibraryBootstrap, LibraryInfo, SessionRecord, SessionSnapshot, SystemResources } from './types'
 
 const COMFY_URL = 'http://127.0.0.1:8189'
 const COMFY_PORT = '8189'
@@ -71,6 +71,8 @@ let cpuSample = sampleCpus()
 let cachedGpuInfo: GpuInfo = { gpuUsage: null, vramUsed: null, vramTotal: null }
 let systemResourcesInterval: ReturnType<typeof setInterval> | null = null
 const generationJobs = new Map<string, GenerationJob>()
+const pendingSessionAssets = new Map<string, number>()
+const sessionAssetExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp'])
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
 function generationKey(sessionId: string, nodeId: string): string {
@@ -186,6 +188,7 @@ async function loadLibraryRoot(): Promise<void> {
     libraryRoot = join(dataRoot(), 'library')
   }
   await mkdir(sessionsRoot(), { recursive: true })
+  await cleanupAllSessionAssets()
 }
 
 async function saveLibraryRoot(): Promise<void> {
@@ -281,6 +284,7 @@ async function duplicateSession(sessionId: string): Promise<{ session: SessionRe
     await mkdir(targetDirectory, { recursive: true })
     await cp(join(sourceDirectory, 'assets'), join(targetDirectory, 'assets'), { recursive: true })
     await writeFile(sessionFile(id), JSON.stringify({ session, snapshot }, null, 2), 'utf8')
+    await cleanupUnusedSessionAssets(id, snapshot)
     return { session, snapshot: await hydrateSnapshot(snapshot) }
   } catch (error) {
     await rm(targetDirectory, { recursive: true, force: true })
@@ -327,6 +331,76 @@ function stripDataUrls(snapshot: SessionSnapshot): SessionSnapshot {
   return clone
 }
 
+function sessionAssetsDirectory(sessionId: string): string {
+  return join(sessionDirectory(sessionId), 'assets')
+}
+
+function assetPathKey(assetPath: string): string {
+  const normalized = resolve(assetPath)
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+}
+
+function resolveSessionAssetPath(sessionId: string, assetPath: string): string {
+  const assetsRoot = `${assetPathKey(sessionAssetsDirectory(sessionId))}${sep}`
+  const target = resolve(assetPath)
+  if (!assetPathKey(target).startsWith(assetsRoot)) throw new Error('Image path is outside the source session')
+  return target
+}
+
+function referencedSessionAssets(sessionId: string, snapshot: SessionSnapshot): Set<string> {
+  const assetsRoot = `${assetPathKey(sessionAssetsDirectory(sessionId))}${sep}`
+  const referenced = new Set<string>()
+  const nodes = snapshot.nodes as Array<{ data?: { image?: ImageAsset | null; result?: GeneratedImage | null } }>
+  const addAsset = (asset?: ImageAsset | GeneratedImage | null): void => {
+    if (!asset?.path) return
+    const key = assetPathKey(asset.path)
+    if (key.startsWith(assetsRoot)) referenced.add(key)
+  }
+  for (const node of nodes) {
+    addAsset(node.data?.image)
+    addAsset(node.data?.result)
+  }
+  return referenced
+}
+
+async function cleanupUnusedSessionAssets(sessionId: string, snapshot: SessionSnapshot, saveStartedAt?: number): Promise<void> {
+  const assetsDirectory = sessionAssetsDirectory(sessionId)
+  const referenced = referencedSessionAssets(sessionId, snapshot)
+  for (const key of referenced) pendingSessionAssets.delete(key)
+
+  let entries
+  try {
+    entries = await readdir(assetsDirectory, { withFileTypes: true })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !sessionAssetExtensions.has(extname(entry.name).toLowerCase())) continue
+    const assetPath = join(assetsDirectory, entry.name)
+    const key = assetPathKey(assetPath)
+    if (referenced.has(key)) continue
+    const createdAt = pendingSessionAssets.get(key)
+    if (createdAt != null && (saveStartedAt == null || createdAt >= saveStartedAt)) continue
+    pendingSessionAssets.delete(key)
+    await rm(assetPath, { force: true })
+  }
+}
+
+async function cleanupAllSessionAssets(): Promise<void> {
+  const entries = await readdir(sessionsRoot(), { withFileTypes: true })
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    try {
+      const parsed = JSON.parse(await readFile(sessionFile(entry.name), 'utf8')) as { snapshot?: SessionSnapshot }
+      await cleanupUnusedSessionAssets(entry.name, parsed.snapshot ?? emptySnapshot())
+    } catch (error) {
+      console.warn(`Could not clean unused assets for session ${entry.name}:`, error)
+    }
+  }
+}
+
 async function imagePreview(source: string | Buffer, previewWidth = 512): Promise<{ dataUrl: string; width: number; height: number }> {
   const image = sharp(source, { failOn: 'error' })
   const metadata = await image.metadata()
@@ -357,9 +431,12 @@ async function hydrateSnapshot(snapshot: SessionSnapshot): Promise<SessionSnapsh
 }
 
 async function saveSession(sessionId: string, snapshot: SessionSnapshot): Promise<SessionRecord> {
+  const saveStartedAt = Date.now()
   const current = JSON.parse(await readFile(sessionFile(sessionId), 'utf8')) as { session: SessionRecord }
   const session = { ...current.session, updatedAt: new Date().toISOString() }
-  await writeFile(sessionFile(sessionId), JSON.stringify({ session, snapshot: stripDataUrls(snapshot) }, null, 2), 'utf8')
+  const persistedSnapshot = stripDataUrls(snapshot)
+  await writeFile(sessionFile(sessionId), JSON.stringify({ session, snapshot: persistedSnapshot }, null, 2), 'utf8')
+  await cleanupUnusedSessionAssets(sessionId, persistedSnapshot, saveStartedAt)
   return session
 }
 
@@ -373,6 +450,7 @@ async function changeLibrary(nextRoot: string): Promise<LibraryBootstrap> {
   libraryRoot = resolve(nextRoot)
   await mkdir(sessionsRoot(), { recursive: true })
   await saveLibraryRoot()
+  await cleanupAllSessionAssets()
   return buildLibraryBootstrap()
 }
 
@@ -384,13 +462,55 @@ async function importImage(sourcePath: string, sessionId: string): Promise<Image
     throw new Error('The selected file is not a readable PNG, JPEG, WebP, or BMP image')
   }
   const extension = extname(sourcePath).toLowerCase() || '.png'
-  const destination = join(sessionDirectory(sessionId), 'assets', `${randomUUID()}${extension}`)
-  await mkdir(dirname(destination), { recursive: true })
-  await copyFile(sourcePath, destination)
-  return {
-    path: destination,
-    name: basename(sourcePath),
-    ...decoded
+  const destination = join(sessionAssetsDirectory(sessionId), `${randomUUID()}${extension}`)
+  const destinationKey = assetPathKey(destination)
+  pendingSessionAssets.set(destinationKey, Date.now())
+  try {
+    await mkdir(dirname(destination), { recursive: true })
+    await copyFile(sourcePath, destination)
+    return {
+      path: destination,
+      name: basename(sourcePath),
+      ...decoded
+    }
+  } catch (error) {
+    pendingSessionAssets.delete(destinationKey)
+    await rm(destination, { force: true })
+    throw error
+  }
+}
+
+async function copySessionAssets(sourceSessionId: string, targetSessionId: string, sourcePaths: string[]): Promise<CopiedSessionAsset[]> {
+  if (!Array.isArray(sourcePaths) || sourcePaths.length > 1000 || sourcePaths.some((sourcePath) => typeof sourcePath !== 'string')) {
+    throw new Error('Invalid session asset copy request')
+  }
+  const sources = [...new Set(sourcePaths)].map((sourcePath) => ({
+    sourcePath,
+    resolvedPath: resolveSessionAssetPath(sourceSessionId, sourcePath)
+  }))
+  sessionDirectory(targetSessionId)
+  if (sourceSessionId === targetSessionId) {
+    return sources.map(({ sourcePath }) => ({ sourcePath, destinationPath: sourcePath }))
+  }
+
+  const copied: CopiedSessionAsset[] = []
+  try {
+    await mkdir(sessionAssetsDirectory(targetSessionId), { recursive: true })
+    for (const source of sources) {
+      const extension = extname(source.resolvedPath).toLowerCase()
+      if (!sessionAssetExtensions.has(extension)) throw new Error('Unsupported session image type')
+      const destinationPath = join(sessionAssetsDirectory(targetSessionId), `${randomUUID()}${extension}`)
+      copied.push({ sourcePath: source.sourcePath, destinationPath })
+      pendingSessionAssets.set(assetPathKey(destinationPath), Date.now())
+      await copyFile(source.resolvedPath, destinationPath)
+    }
+    return copied
+  } catch (error) {
+    for (const asset of copied) {
+      pendingSessionAssets.delete(assetPathKey(asset.destinationPath))
+      await rm(asset.destinationPath, { force: true })
+    }
+    throw error
   }
 }
 
@@ -414,6 +534,25 @@ async function saveImageCopy(sourcePath: string): Promise<boolean> {
   if (result.canceled || !result.filePath) return false
   if (resolve(result.filePath) !== imagePath) await copyFile(imagePath, result.filePath)
   return true
+}
+
+async function captureScreenshot(): Promise<string> {
+  if (!mainWindow) throw new Error('The application window is not ready')
+  const screenshot = await mainWindow.webContents.capturePage()
+  if (screenshot.isEmpty()) throw new Error('The screenshot could not be captured')
+  const directory = join(libraryRoot, 'screenshot')
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const destination = join(directory, `screenshot-${timestamp}.png`)
+  await mkdir(directory, { recursive: true })
+  await writeFile(destination, screenshot.toPNG())
+  return destination
+}
+
+function revealScreenshot(sourcePath: string): void {
+  const screenshotRoot = `${assetPathKey(join(libraryRoot, 'screenshot'))}${sep}`
+  const target = resolve(sourcePath)
+  if (!assetPathKey(target).startsWith(screenshotRoot)) throw new Error('Screenshot path is outside the screenshot folder')
+  shell.showItemInFolder(target)
 }
 
 function setComfyStatus(status: ComfyStatus): void {
@@ -501,8 +640,9 @@ function stopComfyUI(): void {
 function createWindow(): void {
   Menu.setApplicationMenu(null)
   mainWindow = new BrowserWindow({
-    width: 1500,
-    height: 960,
+    width: 1920,
+    height: 1080,
+    useContentSize: true,
     minWidth: 1080,
     minHeight: 700,
     backgroundColor: '#0a0d12',
@@ -652,7 +792,8 @@ async function generateImage(request: GenerateRequest): Promise<GeneratedImage> 
     const bytes = Buffer.from(await imageResponse.arrayBuffer())
     throwIfGenerationCanceled(job.controller.signal)
     const extension = extname(output.filename) || '.png'
-    destination = join(sessionDirectory(request.sessionId), 'assets', `generated-${randomUUID()}${extension}`)
+    destination = join(sessionAssetsDirectory(request.sessionId), `generated-${randomUUID()}${extension}`)
+    pendingSessionAssets.set(assetPathKey(destination), Date.now())
     await mkdir(dirname(destination), { recursive: true })
     await writeFile(destination, bytes)
     const preview = await imagePreview(bytes, 768)
@@ -668,10 +809,11 @@ async function generateImage(request: GenerateRequest): Promise<GeneratedImage> 
       seed: request.settings.seed
     }
   } catch (error) {
-    if (job.controller.signal.aborted) {
-      if (destination) await rm(destination, { force: true })
-      throw new Error('Generation canceled')
+    if (destination) {
+      pendingSessionAssets.delete(assetPathKey(destination))
+      await rm(destination, { force: true })
     }
+    if (job.controller.signal.aborted) throw new Error('Generation canceled')
     throw error
   } finally {
     if (generationJobs.get(key) === job) generationJobs.delete(key)
@@ -733,6 +875,7 @@ function registerIpc(): void {
     return { session: loaded.session, snapshot: loaded.snapshot }
   })
   ipcMain.handle('session:save', (_event, sessionId: string, snapshot: SessionSnapshot) => saveSession(sessionId, snapshot))
+  ipcMain.handle('session:copy-assets', (_event, sourceSessionId: string, targetSessionId: string, sourcePaths: string[]) => copySessionAssets(sourceSessionId, targetSessionId, sourcePaths))
   ipcMain.handle('session:delete', async (_event, sessionId: string): Promise<LibraryBootstrap> => {
     await rm(sessionDirectory(sessionId), { recursive: true, force: true })
     return buildLibraryBootstrap()
@@ -750,6 +893,8 @@ function registerIpc(): void {
   ipcMain.handle('image:cancel-generation', (_event, sessionId: string, nodeId: string) => cancelGeneration(sessionId, nodeId))
   ipcMain.handle('image:copy', (_event, sourcePath: string) => copyImageToClipboard(sourcePath))
   ipcMain.handle('image:save-copy', (_event, sourcePath: string) => saveImageCopy(sourcePath))
+  ipcMain.handle('screenshot:capture', () => captureScreenshot())
+  ipcMain.handle('screenshot:reveal', (_event, sourcePath: string) => revealScreenshot(sourcePath))
 }
 
 if (!hasSingleInstanceLock) {
