@@ -1,0 +1,48 @@
+{
+  "1": {
+    "inputs": { "ckpt_name": "Qwen-Rapid-AIO-NSFW-v23.safetensors" },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "チェックポイントを読み込む" }
+  },
+  "2": {
+    "inputs": {
+      "seed": 65454653,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "sa_solver",
+      "scheduler": "beta",
+      "denoise": 1,
+      "model": ["1", 0],
+      "positive": ["3", 0],
+      "negative": ["4", 0],
+      "latent_image": ["9", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "Kサンプラー" }
+  },
+  "3": {
+    "inputs": { "prompt": "Create an image from the description.", "clip": ["1", 1], "vae": ["1", 2] },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": { "title": "TextEncodeQwenImageEditPlus Input Prompt" }
+  },
+  "4": {
+    "inputs": { "prompt": "", "clip": ["1", 1], "vae": ["1", 2] },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": { "title": "TextEncodeQwenImageEditPlus Negative (leave blank)" }
+  },
+  "5": {
+    "inputs": { "samples": ["2", 0], "vae": ["1", 2] },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAEデコード" }
+  },
+  "6": {
+    "inputs": { "images": ["5", 0] },
+    "class_type": "PreviewImage",
+    "_meta": { "title": "画像プレビュー" }
+  },
+  "9": {
+    "inputs": { "width": 768, "height": 768, "batch_size": 1 },
+    "class_type": "EmptyLatentImage",
+    "_meta": { "title": "Final Image Size" }
+  }
+}
