@@ -1198,11 +1198,28 @@ function Editor(): React.JSX.Element {
               defaultEdgeOptions={{ style: { strokeWidth: 2, stroke: '#77869b' } }}
             >
               <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color='#2b3441' />
-              <MiniMap position='bottom-left' pannable zoomable nodeColor={(node) => {
-                if (node.data.kind === 'prompt') return '#a878ff'
-                if (node.data.kind === 'image') return '#45b8ff'
-                return '#ff9a52'
-              }} />
+              <MiniMap
+                position='bottom-left'
+                pannable
+                zoomable
+                ariaLabel='ノードマップ'
+                bgColor='#0c121a'
+                maskColor='#05080cb8'
+                maskStrokeColor='#72c7f4'
+                maskStrokeWidth={1.5}
+                nodeBorderRadius={8}
+                nodeStrokeWidth={1.5}
+                nodeColor={(node) => {
+                  if (node.data.kind === 'prompt') return '#654398'
+                  if (node.data.kind === 'image') return '#216f96'
+                  return '#96552f'
+                }}
+                nodeStrokeColor={(node) => {
+                  if (node.data.kind === 'prompt') return '#c39cff'
+                  if (node.data.kind === 'image') return '#79d3ff'
+                  return '#ffb17d'
+                }}
+              />
             </ReactFlow>
           </section>
         </div>
