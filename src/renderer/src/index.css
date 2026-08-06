@@ -163,6 +163,7 @@ button { color: inherit; }
 .cancel-generation-button { width: 100%; margin-top: 11px; border: 1px solid #a94b52; border-radius: 9px; padding: 10px; background: linear-gradient(#7f343a, #542227); color: #ffe5e7; font-weight: 750; cursor: pointer; }
 .cancel-generation-button:hover { border-color: #e36a73; background: linear-gradient(#963e46, #67282e); }
 .node-error { margin-top: 9px; border: 1px solid #6b3437; border-radius: 7px; padding: 7px; background: #2b1519; color: #ff9fa4; font-size: 9px; line-height: 1.4; }
+.node-queued { margin-top: 9px; border: 1px solid #49627f; border-radius: 7px; padding: 7px; background: #17212d; color: #a9c9e9; font-size: 9px; line-height: 1.4; }
 .node-canceled { margin-top: 9px; border: 1px solid #5b4c3a; border-radius: 7px; padding: 7px; background: #251f17; color: #d8b98e; font-size: 9px; line-height: 1.4; }
 
 .handle { width: 12px !important; height: 12px !important; border: 2px solid #11161e !important; }

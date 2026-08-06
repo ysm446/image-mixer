@@ -6,7 +6,7 @@ import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import * as os from 'node:os'
 import sharp from 'sharp'
-import type { ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, ImageAsset, LibraryBootstrap, LibraryInfo, SessionRecord, SessionSnapshot, SystemResources } from './types'
+import type { ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, LibraryBootstrap, LibraryInfo, SessionRecord, SessionSnapshot, SystemResources } from './types'
 
 const COMFY_URL = 'http://127.0.0.1:8189'
 const COMFY_PORT = '8189'
@@ -60,7 +60,14 @@ type WorkflowNode = {
 type Workflow = Record<string, WorkflowNode>
 type UploadResponse = { name: string; subfolder?: string; type?: string }
 type HistoryImage = { filename: string; subfolder: string; type: string }
-type GenerationJob = { controller: AbortController; promptId: string | null }
+type GenerationJob = {
+  controller: AbortController
+  promptId: string | null
+  request: GenerateRequest
+  state: 'queued' | 'running'
+  resolve: (image: GeneratedImage) => void
+  reject: (reason?: unknown) => void
+}
 
 let mainWindow: BrowserWindow | null = null
 let comfyProcess: ChildProcess | null = null
@@ -71,6 +78,9 @@ let cpuSample = sampleCpus()
 let cachedGpuInfo: GpuInfo = { gpuUsage: null, vramUsed: null, vramTotal: null }
 let systemResourcesInterval: ReturnType<typeof setInterval> | null = null
 const generationJobs = new Map<string, GenerationJob>()
+const latestGenerationResultPaths = new Map<string, string>()
+const generationQueue: string[] = []
+let processingGenerationQueue = false
 const pendingSessionAssets = new Map<string, number>()
 const sessionAssetExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp'])
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
@@ -216,7 +226,7 @@ function recoverInterruptedGenerations(sessionId: string, snapshot: SessionSnaps
   }
   let recovered = false
   for (const node of clone.nodes) {
-    if (node.data?.kind !== 'generate' || node.data.state !== 'running' || typeof node.id !== 'string') continue
+    if (node.data?.kind !== 'generate' || (node.data.state !== 'queued' && node.data.state !== 'running') || typeof node.id !== 'string') continue
     if (generationJobs.has(generationKey(sessionId, node.id))) continue
     node.data.state = 'canceled'
     node.data.error = null
@@ -742,22 +752,33 @@ async function waitForResult(promptId: string, signal: AbortSignal, timeoutMs = 
   throw new Error('Image generation timed out')
 }
 
-async function generateImage(request: GenerateRequest): Promise<GeneratedImage> {
-  if (!(await isComfyReady())) throw new Error('ComfyUI is not ready')
+function validateGenerateRequest(request: GenerateRequest): void {
+  sessionDirectory(request.sessionId)
   if (!request.prompt.trim()) throw new Error('Connect a non-empty Prompt node')
-  const connectedImageCount = request.imagePaths.filter((path): path is string => Boolean(path)).length
-  if (request.imagePaths.length !== 3) throw new Error('Image inputs must contain three slots')
+  if (request.imagePaths.length !== 3 || request.imageSourceNodeIds.length !== 3) throw new Error('Image inputs must contain three slots')
   const { width, height, seed, steps, cfg } = request.settings
   if (!Number.isInteger(width) || width < 64 || width > 4096 || width % 8 !== 0) throw new Error('Width must be a multiple of 8 between 64 and 4096')
   if (!Number.isInteger(height) || height < 64 || height > 4096 || height % 8 !== 0) throw new Error('Height must be a multiple of 8 between 64 and 4096')
   if (!Number.isSafeInteger(seed) || seed < 0) throw new Error('Seed must be a non-negative safe integer')
   if (!Number.isInteger(steps) || steps < 1 || steps > 100) throw new Error('Steps must be an integer between 1 and 100')
   if (!Number.isFinite(cfg) || cfg < 0 || cfg > 100) throw new Error('CFG must be between 0 and 100')
+}
 
-  const key = generationKey(request.sessionId, request.nodeId)
-  if (generationJobs.has(key)) throw new Error('This node is already generating an image')
-  const job: GenerationJob = { controller: new AbortController(), promptId: null }
-  generationJobs.set(key, job)
+async function runImageGeneration(job: GenerationJob): Promise<GeneratedImage> {
+  const queuedRequest = job.request
+  if (!(await isComfyReady())) throw new Error('ComfyUI is not ready')
+  throwIfGenerationCanceled(job.controller.signal)
+  const imagePaths = queuedRequest.imagePaths.map((path, index) => {
+    const sourceNodeId = queuedRequest.imageSourceNodeIds[index]
+    return sourceNodeId ? latestGenerationResultPaths.get(generationKey(queuedRequest.sessionId, sourceNodeId)) ?? path : path
+  })
+  for (let index = 0; index < imagePaths.length; index += 1) {
+    if (queuedRequest.imageSourceNodeIds[index] && !imagePaths[index]) {
+      throw new Error(`Connected generation node ${queuedRequest.imageSourceNodeIds[index]} did not produce an image`)
+    }
+  }
+  const request: GenerateRequest = { ...queuedRequest, imagePaths }
+  const connectedImageCount = imagePaths.filter((path): path is string => Boolean(path)).length
   let destination: string | null = null
   try {
     const workflowName = connectedImageCount > 0 ? 'Qwen-Rapid-AIO.json' : 'Qwen-Rapid-AIO-Generate.json'
@@ -815,11 +836,64 @@ async function generateImage(request: GenerateRequest): Promise<GeneratedImage> 
     }
     if (job.controller.signal.aborted) throw new Error('Generation canceled')
     throw error
-  } finally {
-    if (generationJobs.get(key) === job) generationJobs.delete(key)
   }
 }
 
+async function processGenerationQueue(): Promise<void> {
+  if (processingGenerationQueue) return
+  processingGenerationQueue = true
+  try {
+    while (generationQueue.length > 0) {
+      const key = generationQueue.shift()!
+      const job = generationJobs.get(key)
+      if (!job) continue
+      if (job.controller.signal.aborted) {
+        generationJobs.delete(key)
+        job.reject(new Error('Generation canceled'))
+        continue
+      }
+
+      job.state = 'running'
+      const startedEvent: GenerationStartedEvent = {
+        sessionId: job.request.sessionId,
+        nodeId: job.request.nodeId,
+        startedAtMs: Date.now()
+      }
+      mainWindow?.webContents.send('image:generation-started', startedEvent)
+      try {
+        const result = await runImageGeneration(job)
+        latestGenerationResultPaths.set(key, result.path)
+        job.resolve(result)
+      } catch (error) {
+        job.reject(error)
+      } finally {
+        if (generationJobs.get(key) === job) generationJobs.delete(key)
+      }
+    }
+  } finally {
+    processingGenerationQueue = false
+  }
+}
+
+function enqueueImageGeneration(request: GenerateRequest): Promise<GeneratedImage> {
+  validateGenerateRequest(request)
+  const key = generationKey(request.sessionId, request.nodeId)
+  if (generationJobs.has(key)) throw new Error('This node is already queued or generating an image')
+
+  return new Promise<GeneratedImage>((resolve, reject) => {
+    const job: GenerationJob = {
+      controller: new AbortController(),
+      promptId: null,
+      request: structuredClone(request),
+      state: 'queued',
+      resolve,
+      reject
+    }
+    generationJobs.set(key, job)
+    generationQueue.push(key)
+    void processGenerationQueue()
+  })
+}
 async function cancelComfyPrompt(promptId: string): Promise<void> {
   try {
     const response = await fetch(`${COMFY_URL}/api/jobs/${encodeURIComponent(promptId)}/cancel`, { method: 'POST' })
@@ -843,9 +917,17 @@ async function cancelComfyPrompt(promptId: string): Promise<void> {
 
 async function cancelGeneration(sessionId: string, nodeId: string): Promise<boolean> {
   sessionDirectory(sessionId)
-  const job = generationJobs.get(generationKey(sessionId, nodeId))
+  const key = generationKey(sessionId, nodeId)
+  const job = generationJobs.get(key)
   if (!job) return false
   job.controller.abort()
+  if (job.state === 'queued') {
+    const queueIndex = generationQueue.indexOf(key)
+    if (queueIndex >= 0) generationQueue.splice(queueIndex, 1)
+    generationJobs.delete(key)
+    job.reject(new Error('Generation canceled'))
+    return true
+  }
   if (job.promptId) await cancelComfyPrompt(job.promptId)
   return true
 }
@@ -889,7 +971,7 @@ function registerIpc(): void {
     return importImage(result.filePaths[0], sessionId)
   })
   ipcMain.handle('image:import', (_event, sourcePath: string, sessionId: string) => importImage(sourcePath, sessionId))
-  ipcMain.handle('image:generate', (_event, request: GenerateRequest) => generateImage(request))
+  ipcMain.handle('image:generate', (_event, request: GenerateRequest) => enqueueImageGeneration(request))
   ipcMain.handle('image:cancel-generation', (_event, sessionId: string, nodeId: string) => cancelGeneration(sessionId, nodeId))
   ipcMain.handle('image:copy', (_event, sourcePath: string) => copyImageToClipboard(sourcePath))
   ipcMain.handle('image:save-copy', (_event, sourcePath: string) => saveImageCopy(sourcePath))

@@ -1,4 +1,4 @@
-import type { ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, ImageAsset, LibraryBootstrap, SessionRecord, SessionSnapshot, SystemResources } from '../main/types'
+import type { ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, LibraryBootstrap, SessionRecord, SessionSnapshot, SystemResources } from '../main/types'
 
 export interface ImageMixerApi {
   getComfyStatus(): Promise<ComfyStatus>
@@ -20,6 +20,7 @@ export interface ImageMixerApi {
   captureScreenshot(): Promise<string>
   revealScreenshot(sourcePath: string): Promise<void>
   onComfyStatus(callback: (status: ComfyStatus) => void): () => void
+  onGenerationStarted(callback: (event: GenerationStartedEvent) => void): () => void
   onSystemResources(callback: (resources: SystemResources) => void): () => void
 }
 

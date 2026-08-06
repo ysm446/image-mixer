@@ -22,7 +22,7 @@ import '@xyflow/react/dist/style.css'
 import type { ComfyStatus, GeneratedImage, GenerateSettings, ImageAsset, LibraryBootstrap, LibraryInfo, SessionRecord, SessionSnapshot } from '../../main/types'
 import { SystemResourceMonitor } from './SystemResourceMonitor'
 
-type RenderState = 'idle' | 'running' | 'succeeded' | 'failed' | 'canceled'
+type RenderState = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
 
 const MIN_IMAGE_DIMENSION = 64
 const MAX_IMAGE_DIMENSION = 4096
@@ -358,16 +358,17 @@ function GenerateNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.
             {resultNotice && <div className='result-action-notice'>{resultNotice}</div>}
           </>
         ) : (
-          <div className='result-placeholder'>{generateData.state === 'running' ? <span className='spinner' /> : 'Generated image'}</div>
+          <div className='result-placeholder'>{generateData.state === 'running' ? <span className='spinner' /> : generateData.state === 'queued' ? 'Queued' : 'Generated image'}</div>
         )}
       </div>
       {displayedDurationMs != null && (
         <div className='generation-duration'><span>{generateData.state === 'running' ? '経過時間' : generateData.state === 'canceled' ? 'キャンセルまで' : '生成時間'}</span><strong>{formatDuration(displayedDurationMs)}</strong></div>
       )}
       {generateData.error && <div className='node-error'>{generateData.error}</div>}
+      {generateData.state === 'queued' && <div className='node-queued'>キュー待機中</div>}
       {generateData.state === 'canceled' && <div className='node-canceled'>生成をキャンセルしました</div>}
-      {generateData.state === 'running' ? (
-        <button type='button' className='cancel-generation-button nodrag' onClick={() => void cancelGeneration(id)}>Cancel</button>
+      {generateData.state === 'queued' || generateData.state === 'running' ? (
+        <button type='button' className='cancel-generation-button nodrag' onClick={() => void cancelGeneration(id)}>{generateData.state === 'queued' ? 'キューから削除' : 'Cancel'}</button>
       ) : (
         <button type='button' className='generate-button nodrag' disabled={!comfyReady} onClick={() => void generate(id)}>Generate</button>
       )}
@@ -459,6 +460,10 @@ function isEditableElement(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target.isContentEditable
 }
 
+function generationJobKey(sessionId: string, nodeId: string): string {
+  return `${sessionId}:${nodeId}`
+}
+
 function Editor(): React.JSX.Element {
   const { fitView, getNodes, screenToFlowPosition } = useReactFlow()
   const [nodes, setNodes, onNodesChange] = useNodesState<EditorNode>(defaultNodes())
@@ -487,12 +492,23 @@ function Editor(): React.JSX.Element {
   const activeSessionIdRef = useRef<string | null>(null)
   const canvasRef = useRef<HTMLElement | null>(null)
   const canceledGenerationIds = useRef(new Set<string>())
+  const generationStartTimes = useRef(new Map<string, number>())
   activeSessionIdRef.current = activeSession?.id ?? null
 
   useEffect(() => {
     void window.imageMixer.getComfyStatus().then(setComfy)
     return window.imageMixer.onComfyStatus(setComfy)
   }, [])
+
+  useEffect(() => window.imageMixer.onGenerationStarted(({ sessionId, nodeId, startedAtMs }) => {
+    generationStartTimes.current.set(generationJobKey(sessionId, nodeId), startedAtMs)
+    if (activeSessionIdRef.current !== sessionId) return
+    setNodes((current) => current.map((node) => (
+      node.id === nodeId && node.data.kind === 'generate'
+        ? { ...node, data: { ...node.data, state: 'running', durationMs: 0, startedAtMs } }
+        : node
+    )))
+  }), [setNodes])
 
   useEffect(() => {
     const closeMenus = (): void => {
@@ -639,20 +655,28 @@ function Editor(): React.JSX.Element {
 
   const generate = useCallback(async (nodeId: string) => {
     if (!activeSession) return
+    const sessionId = activeSession.id
     const target = nodes.find((node) => node.id === nodeId)
-    if (!target || target.data.kind !== 'generate') return
+    if (!target || target.data.kind !== 'generate' || target.data.state === 'queued' || target.data.state === 'running') return
     const promptEdge = edges.find((edge) => edge.target === nodeId && edge.targetHandle === 'prompt')
     const promptNode = nodes.find((node) => node.id === promptEdge?.source)
     const prompt = promptNode?.data.kind === 'prompt' ? promptNode.data.text.trim() : ''
     const imagePaths: Array<string | null> = []
+    const imageSourceNodeIds: Array<string | null> = []
     let hasEmptyImageConnection = false
     for (const handle of ['image1', 'image2', 'image3']) {
       const edge = edges.find((candidate) => candidate.target === nodeId && candidate.targetHandle === handle)
       const source = nodes.find((node) => node.id === edge?.source)
-      if (source?.data.kind === 'image' && source.data.image) imagePaths.push(source.data.image.path)
-      else if (source?.data.kind === 'generate' && source.data.result) imagePaths.push(source.data.result.path)
-      else {
+      if (source?.data.kind === 'image' && source.data.image) {
+        imagePaths.push(source.data.image.path)
+        imageSourceNodeIds.push(null)
+      } else if (source?.data.kind === 'generate') {
+        imagePaths.push(source.data.result?.path ?? null)
+        imageSourceNodeIds.push(source.id)
+        if (!source.data.result && source.data.state !== 'queued' && source.data.state !== 'running') hasEmptyImageConnection = true
+      } else {
         imagePaths.push(null)
+        imageSourceNodeIds.push(null)
         if (edge) hasEmptyImageConnection = true
       }
     }
@@ -675,39 +699,51 @@ function Editor(): React.JSX.Element {
       updateNode(nodeId, { settings })
     }
 
-    const startedAtMs = Date.now()
-    canceledGenerationIds.current.delete(nodeId)
-    updateNode(nodeId, { state: 'running', error: null, durationMs: 0, startedAtMs })
+    const key = generationJobKey(sessionId, nodeId)
+    canceledGenerationIds.current.delete(key)
+    generationStartTimes.current.delete(key)
+    updateNode(nodeId, { state: 'queued', error: null, durationMs: null, startedAtMs: null })
     try {
-      const result = await window.imageMixer.generateImage({ nodeId, sessionId: activeSession.id, prompt, imagePaths, settings })
-      updateNode(nodeId, { state: 'succeeded', result, error: null, durationMs: Date.now() - startedAtMs, startedAtMs: null })
+      const result = await window.imageMixer.generateImage({ nodeId, sessionId, prompt, imagePaths, imageSourceNodeIds, settings })
+      const startedAtMs = generationStartTimes.current.get(key)
+      generationStartTimes.current.delete(key)
+      canceledGenerationIds.current.delete(key)
+      if (activeSessionIdRef.current === sessionId) {
+        updateNode(nodeId, { state: 'succeeded', result, error: null, durationMs: startedAtMs == null ? null : Date.now() - startedAtMs, startedAtMs: null })
+      }
     } catch (error) {
-      const wasCanceled = canceledGenerationIds.current.delete(nodeId)
-      updateNode(nodeId, wasCanceled
-        ? { state: 'canceled', error: null, durationMs: Date.now() - startedAtMs, startedAtMs: null }
-        : { state: 'failed', error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAtMs, startedAtMs: null })
+      const startedAtMs = generationStartTimes.current.get(key)
+      generationStartTimes.current.delete(key)
+      const wasCanceled = canceledGenerationIds.current.delete(key) || (error instanceof Error && error.message === 'Generation canceled')
+      if (activeSessionIdRef.current === sessionId) {
+        updateNode(nodeId, wasCanceled
+          ? { state: 'canceled', error: null, durationMs: startedAtMs == null ? null : Date.now() - startedAtMs, startedAtMs: null }
+          : { state: 'failed', error: error instanceof Error ? error.message : String(error), durationMs: startedAtMs == null ? null : Date.now() - startedAtMs, startedAtMs: null })
+      }
     }
   }, [activeSession, edges, nodes, updateNode])
 
   const cancelGeneration = useCallback(async (nodeId: string) => {
     if (!activeSession) return
+    const sessionId = activeSession.id
     const target = nodes.find((node) => node.id === nodeId)
-    if (!target || target.data.kind !== 'generate' || target.data.state !== 'running') return
-    canceledGenerationIds.current.add(nodeId)
+    if (!target || target.data.kind !== 'generate' || (target.data.state !== 'queued' && target.data.state !== 'running')) return
+    const key = generationJobKey(sessionId, nodeId)
+    canceledGenerationIds.current.add(key)
     try {
-      const canceled = await window.imageMixer.cancelGeneration(activeSession.id, nodeId)
+      const canceled = await window.imageMixer.cancelGeneration(sessionId, nodeId)
       if (!canceled) {
-        canceledGenerationIds.current.delete(nodeId)
+        canceledGenerationIds.current.delete(key)
         return
       }
-      const durationMs = target.data.startedAtMs == null ? target.data.durationMs : Date.now() - target.data.startedAtMs
+      const startedAtMs = generationStartTimes.current.get(key) ?? target.data.startedAtMs
+      const durationMs = startedAtMs == null ? null : Date.now() - startedAtMs
       updateNode(nodeId, { state: 'canceled', error: null, durationMs, startedAtMs: null })
     } catch (error) {
-      canceledGenerationIds.current.delete(nodeId)
+      canceledGenerationIds.current.delete(key)
       updateNode(nodeId, { error: error instanceof Error ? error.message : String(error) })
     }
   }, [activeSession, nodes, updateNode])
-
   const copyResult = useCallback(async (nodeId: string): Promise<boolean> => {
     const target = nodes.find((node) => node.id === nodeId)
     const result = target?.data.kind === 'generate' ? target.data.result : null

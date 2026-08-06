@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import type { ComfyStatus, GenerateRequest, SessionSnapshot, SystemResources } from '../main/types'
+import type { ComfyStatus, GenerateRequest, GenerationStartedEvent, SessionSnapshot, SystemResources } from '../main/types'
 import type { ImageMixerApi } from './bridge'
 
 const api: ImageMixerApi = {
@@ -29,6 +29,11 @@ const api: ImageMixerApi = {
     const listener = (_event: IpcRendererEvent, status: ComfyStatus): void => callback(status)
     ipcRenderer.on('comfy:status-changed', listener)
     return () => ipcRenderer.off('comfy:status-changed', listener)
+  },
+  onGenerationStarted: (callback) => {
+    const listener = (_event: IpcRendererEvent, generation: GenerationStartedEvent): void => callback(generation)
+    ipcRenderer.on('image:generation-started', listener)
+    return () => ipcRenderer.off('image:generation-started', listener)
   },
   onSystemResources: (callback) => {
     const listener = (_event: IpcRendererEvent, resources: SystemResources): void => callback(resources)

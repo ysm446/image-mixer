@@ -1,7 +1,7 @@
 # ノード画像エディタ仕様
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-06 12:45
+更新日時: 2026-08-06 13:23
 
 ## 目的
 
@@ -98,16 +98,16 @@ idle → validating → uploading → queued → running → downloading → suc
 - `idle`: 未実行または設定変更後。
 - `validating`: 入力と workflow を検証中。
 - `uploading`: 入力画像を ComfyUI へ転送中。
-- `queued`: `/prompt` への投入済み。
+- `queued`: Generate操作をアプリ内FIFOキューへ追加済みで、先行ジョブの完了待ち。
 - `running`: ComfyUI が対象 prompt を実行中。
 - `downloading`: history から結果を取得中。
 - `succeeded`: 結果を project asset として保存済み。
 - `failed`: validation、HTTP、実行、保存のいずれかで失敗。
 - `canceled`: 待機または実行をユーザーが中止。
 
-生成中はGenerateボタンをCancelボタンへ切り替える。キャンセル後は`canceled`状態とキャンセルまでの経過時間をノードへ保存し、同じノードから再生成できる。
+Generate操作はセッションにかかわらずアプリ内FIFOキューへ追加し、main processが同時に1件だけ実行する。待機中は「キュー待機中」と「キューから削除」を表示し、実行開始後はCancelボタンへ切り替える。待機ジョブの削除、実行ジョブの成功・失敗・キャンセルのいずれでも次のジョブを自動開始する。接続元の生成ノードも先にキューへ入っている場合、後続ジョブはクリック時の古い結果を固定せず、実行直前に接続元の最新成功結果を入力として解決する。キャンセル後は`canceled`状態と実行開始後の経過時間をノードへ保存し、同じノードから再生成できる。
 
-セッション読込時は、保存された`running`ノードに対応するmain processの実行ジョブが存在するか照合する。実行ジョブが存在しない場合は、アプリ終了・更新・renderer再読込による中断とみなし、`canceled`へ変更して開始時刻と古いエラーを消去し、修復後のsnapshotを保存する。
+セッション読込時は、保存された`queued`または`running`ノードに対応するmain processの実行ジョブが存在するか照合する。実行ジョブが存在しない場合は、アプリ終了・更新・renderer再読込による中断とみなし、`canceled`へ変更して開始時刻と古いエラーを消去し、修復後のsnapshotを保存する。
 
 エラーには利用者向け要約と、debug 用の ComfyUI node ID、node type、server message を分けて保存します。
 

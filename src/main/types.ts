@@ -36,7 +36,14 @@ export interface GenerateRequest {
   sessionId: string
   prompt: string
   imagePaths: Array<string | null>
+  imageSourceNodeIds: Array<string | null>
   settings: GenerateSettings
+}
+
+export interface GenerationStartedEvent {
+  sessionId: string
+  nodeId: string
+  startedAtMs: number
 }
 
 export interface GeneratedImage extends ImageAsset {
