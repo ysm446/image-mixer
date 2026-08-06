@@ -50,6 +50,7 @@ type GenerateData = {
   kind: 'generate'
   title: string
   settings: GenerateSettings
+  matchImage1Size?: boolean
   state: RenderState
   result: GeneratedImage | null
   error: string | null
@@ -75,7 +76,6 @@ type EditorActions = {
   updateNode: (nodeId: string, patch: Partial<EditorData>) => void
   chooseImage: (nodeId: string) => Promise<void>
   dropImage: (nodeId: string, file: File) => Promise<void>
-  matchInputSize: (nodeId: string) => void
   generate: (nodeId: string) => Promise<void>
   cancelGeneration: (nodeId: string) => Promise<void>
   copyResult: (nodeId: string) => Promise<boolean>
@@ -314,7 +314,7 @@ function formatDuration(durationMs: number): string {
 }
 
 function GenerateNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Element {
-  const { comfyReady, hasImageInput, updateNode, matchInputSize, generate, cancelGeneration, copyResult, saveResult, previewResult } = useEditor()
+  const { comfyReady, hasImageInput, updateNode, generate, cancelGeneration, copyResult, saveResult, previewResult } = useEditor()
   const generateData = data as GenerateData
   const imageEditingMode = hasImageInput(id)
   const [resultNotice, setResultNotice] = useState<string | null>(null)
@@ -359,19 +359,15 @@ function GenerateNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.
         <div className='size-settings-row'>
           <NumberField label='Width' value={generateData.settings.width} min={MIN_IMAGE_DIMENSION} max={MAX_IMAGE_DIMENSION} step={IMAGE_DIMENSION_STEP} normalize={normalizeImageDimension} onChange={(value) => setSetting('width', value)} />
           <NumberField label='Height' value={generateData.settings.height} min={MIN_IMAGE_DIMENSION} max={MAX_IMAGE_DIMENSION} step={IMAGE_DIMENSION_STEP} normalize={normalizeImageDimension} onChange={(value) => setSetting('height', value)} />
-          <button
-            type='button'
-            className='match-size-button nodrag'
-            title='Image 1の幅・高さに合わせる'
-            aria-label='Image 1の幅・高さに合わせる'
-            onClick={() => matchInputSize(id)}
-          >
-            <svg viewBox='0 0 24 24' aria-hidden='true'>
-              <path d='M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5' />
-              <path d='M8 8h8v8H8z' />
-            </svg>
-          </button>
         </div>
+        <label className='match-size-toggle nodrag nopan'>
+          <input
+            type='checkbox'
+            checked={Boolean(generateData.matchImage1Size)}
+            onChange={(event) => updateNode(id, { matchImage1Size: event.target.checked })}
+          />
+          <span>Generate時にImage 1のサイズへ合わせる</span>
+        </label>
         <NumberField
           label='Seed'
           value={generateData.settings.seed}
@@ -455,6 +451,7 @@ const initialNodes: EditorNode[] = [
       kind: 'generate',
       title: 'Qwen composition',
       settings: { width: 768, height: 768, seed: 65454653, steps: 4, cfg: 1 },
+      matchImage1Size: false,
       state: 'idle',
       result: null,
       error: null,
@@ -688,22 +685,6 @@ function Editor(): React.JSX.Element {
     }
   }, [activeSession, updateNode])
 
-  const matchInputSize = useCallback((nodeId: string) => {
-    const target = nodes.find((node) => node.id === nodeId)
-    const inputEdge = edges.find((edge) => edge.target === nodeId && edge.targetHandle === 'image1')
-    const source = nodes.find((node) => node.id === inputEdge?.source)
-    const image = source?.data.kind === 'image' ? source.data.image : source?.data.kind === 'generate' ? source.data.result : null
-    if (!target || target.data.kind !== 'generate') return
-    if (!image?.width || !image.height) {
-      updateNode(nodeId, { error: 'Image 1へ解像度を取得できる画像を接続してください。' })
-      return
-    }
-    const scale = Math.min(1, MAX_IMAGE_DIMENSION / image.width, MAX_IMAGE_DIMENSION / image.height)
-    const width = normalizeImageDimension(image.width * scale)
-    const height = normalizeImageDimension(image.height * scale)
-    updateNode(nodeId, { settings: { ...target.data.settings, width, height }, error: null })
-  }, [edges, nodes, updateNode])
-
   const generate = useCallback(async (nodeId: string) => {
     if (!activeSession) return
     const sessionId = activeSession.id
@@ -741,12 +722,28 @@ function Editor(): React.JSX.Element {
       return
     }
 
-    const settings = {
-      ...target.data.settings,
-      width: normalizeImageDimension(target.data.settings.width),
-      height: normalizeImageDimension(target.data.settings.height)
+    let width = normalizeImageDimension(target.data.settings.width)
+    let height = normalizeImageDimension(target.data.settings.height)
+    if (target.data.matchImage1Size) {
+      const image1Edge = edges.find((edge) => edge.target === nodeId && edge.targetHandle === 'image1')
+      const image1Source = nodes.find((node) => node.id === image1Edge?.source)
+      const image1Size = image1Source?.data.kind === 'image'
+        ? image1Source.data.image
+        : image1Source?.data.kind === 'generate'
+          ? image1Source.data.state === 'queued' || image1Source.data.state === 'running'
+            ? image1Source.data.settings
+            : image1Source.data.result ?? image1Source.data.settings
+          : null
+      if (!image1Size?.width || !image1Size.height) {
+        updateNode(nodeId, { state: 'failed', error: 'Image 1へ解像度を取得できる画像を接続してください。', durationMs: null })
+        return
+      }
+      const scale = Math.min(1, MAX_IMAGE_DIMENSION / image1Size.width, MAX_IMAGE_DIMENSION / image1Size.height)
+      width = normalizeImageDimension(image1Size.width * scale)
+      height = normalizeImageDimension(image1Size.height * scale)
     }
-    if (settings.width !== target.data.settings.width || settings.height !== target.data.settings.height) {
+    const settings = { ...target.data.settings, width, height }
+    if (width !== target.data.settings.width || height !== target.data.settings.height) {
       updateNode(nodeId, { settings })
     }
 
@@ -1003,6 +1000,7 @@ function Editor(): React.JSX.Element {
       kind,
       title: 'Qwen Edit',
       settings: { width: 768, height: 768, seed: Math.floor(Math.random() * 2147483647), steps: 4, cfg: 1 },
+      matchImage1Size: false,
       state: 'idle',
       result: null,
       error: null,
@@ -1163,13 +1161,12 @@ function Editor(): React.JSX.Element {
     updateNode,
     chooseImage,
     dropImage,
-    matchInputSize,
     generate,
     cancelGeneration,
     copyResult,
     saveResult,
     previewResult: setPreviewImage
-  }), [cancelGeneration, chooseImage, comfy.phase, copyResult, dropImage, generate, hasImageInput, matchInputSize, saveResult, updateNode])
+  }), [cancelGeneration, chooseImage, comfy.phase, copyResult, dropImage, generate, hasImageInput, saveResult, updateNode])
 
   const nodeTypes = useMemo(() => ({ editor: EditorNodeComponent }), [])
 

@@ -1,7 +1,7 @@
 # ノード画像エディタ仕様
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-06 13:57
+更新日時: 2026-08-06 14:12
 
 ## 目的
 
@@ -46,7 +46,7 @@
 - advanced fields: steps、CFG、sampler、scheduler、denoise、negative prompt。
 - workflow ID と workflow version を保持する。
 - 実行前に入力数、画像存在、サイズ、ComfyUI 接続、モデル、workflow schema を検証する。
-- Width・Height入力欄の右横に置くアイコン操作で、`image1`へ接続したImageノードまたは生成済みQwen Editノードの解像度をwidth / heightへ反映する。4096px以内へ縮小し、各辺を8の倍数へ丸める。
+- 「Generate時にImage 1のサイズへ合わせる」チェックボックスを有効にすると、Generate操作のたびに`image1`へ接続したImageノードまたはQwen Editノードの出力解像度をwidth / heightへ反映する。生成待ちのQwen Editノードでは設定中の出力サイズを使用する。4096px以内へ縮小し、各辺を8の倍数へ丸める。
 - Qwen Editノードの結果領域とノード幅は、未生成時にはwidth / height、生成後には実際の結果画像の解像度から縦横比を求めて変形する。極端な比率では設定欄を操作できる最小幅・高さを維持する。
 
 入力画像の順番は意味を持ちます。接続順ではなく、`image1`、`image2`、`image3` の番号付き handle へ明示的に接続し、ComfyUI の同名 input へ対応させます。

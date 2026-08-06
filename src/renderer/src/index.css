@@ -139,10 +139,10 @@ button { color: inherit; }
 .image-meta strong { flex: none; color: #92a4b9; font-size: 9px; font-variant-numeric: tabular-nums; }
 
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 22px; }
-.size-settings-row { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)) 31px; align-items: end; gap: 8px; }
-.match-size-button { display: grid; width: 31px; height: 31px; place-items: center; border: 1px solid #35516b; border-radius: 7px; padding: 0; background: #101d29; color: #9edaff; cursor: pointer; }
-.match-size-button:hover { border-color: #45b8ff; background: #142638; }
-.match-size-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.size-settings-row { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 8px; }
+.match-size-toggle { display: flex; grid-column: 1 / -1; align-items: center; gap: 7px; width: fit-content; color: #8fa0b3; font-size: 9px; cursor: pointer; }
+.match-size-toggle input { width: 14px; height: 14px; margin: 0; accent-color: #45b8ff; cursor: pointer; }
+.match-size-toggle:has(input:checked) { color: #b8dfff; }
 .setting-field { display: grid; gap: 4px; color: #8490a0; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
 .setting-input-row { display: flex; min-width: 0; gap: 5px; }
 .setting-field input { width: 100%; min-width: 0; border: 1px solid #303a48; border-radius: 7px; outline: none; padding: 7px 8px; background: #0d1219; color: #e6edf7; font-size: 11px; }
