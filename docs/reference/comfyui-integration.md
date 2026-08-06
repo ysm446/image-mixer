@@ -1,7 +1,7 @@
 # ComfyUI 連携仕様
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-06 01:45
+更新日時: 2026-08-07 02:43
 
 ## 対象
 
@@ -163,6 +163,8 @@ $comfyPath = 'runtime\ComfyUI\main.py'
 - すでに互換 ComfyUI が応答している場合は、接続利用かアプリ管理プロセスの起動かを区別する。
 - stdout / stderr を `data/logs` へ保存し、UI には直近行だけを表示する。
 - window close 時は、アプリが起動した process だけを graceful shutdown する。
+- top barのLoad／Unload操作は限定IPC経由で実行し、Load中・Unload中は再操作を無効にする。
+- 既存の外部ComfyUIへ接続した場合はアプリから停止せず、Unload操作を無効にする。
 - renderer へ process handle や任意 command 実行機能を公開しない。
 
 ## キャンセル

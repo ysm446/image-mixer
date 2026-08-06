@@ -1,4 +1,4 @@
-export type ComfyPhase = 'starting' | 'ready' | 'stopped' | 'error'
+export type ComfyPhase = 'starting' | 'ready' | 'stopping' | 'stopped' | 'error'
 
 export interface ComfyStatus {
   phase: ComfyPhase

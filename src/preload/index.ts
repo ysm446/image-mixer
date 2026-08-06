@@ -4,6 +4,8 @@ import type { ImageMixerApi } from './bridge'
 
 const api: ImageMixerApi = {
   getComfyStatus: () => ipcRenderer.invoke('comfy:status'),
+  startComfyUI: () => ipcRenderer.invoke('comfy:start'),
+  stopComfyUI: () => ipcRenderer.invoke('comfy:stop'),
   bootstrapLibrary: () => ipcRenderer.invoke('library:bootstrap'),
   chooseLibrary: () => ipcRenderer.invoke('library:choose'),
   createSession: (name) => ipcRenderer.invoke('session:create', name),

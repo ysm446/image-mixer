@@ -27,11 +27,19 @@ type RenderState = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'can
 const MIN_IMAGE_DIMENSION = 64
 const MAX_IMAGE_DIMENSION = 4096
 const IMAGE_DIMENSION_STEP = 8
+const DEFAULT_SIDEBAR_WIDTH = 270
+const MIN_SIDEBAR_WIDTH = 220
+const MAX_SIDEBAR_WIDTH = 520
+const SIDEBAR_WIDTH_STORAGE_KEY = 'image-mixer.sidebar-width'
 
 function normalizeImageDimension(value: number): number {
   if (!Number.isFinite(value)) return MIN_IMAGE_DIMENSION
   const rounded = Math.round(value / IMAGE_DIMENSION_STEP) * IMAGE_DIMENSION_STEP
   return Math.min(MAX_IMAGE_DIMENSION, Math.max(MIN_IMAGE_DIMENSION, rounded))
+}
+
+function clampSidebarWidth(value: number): number {
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, value))
 }
 
 function imageMediaSize(width: number | undefined, height: number | undefined, fallback: { width: number; height: number }): { width: number; height: number } {
@@ -557,6 +565,7 @@ function Editor(): React.JSX.Element {
   const [nodes, setNodes, onNodesChange] = useNodesState<EditorNode>(defaultNodes())
   const [edges, setEdges, onEdgesChange] = useEdgesState<EditorEdge>(defaultEdges())
   const [comfy, setComfy] = useState<ComfyStatus>({ phase: 'starting', message: 'Checking ComfyUI…', managed: false })
+  const [comfyTogglePending, setComfyTogglePending] = useState(false)
   const [library, setLibrary] = useState<LibraryInfo | null>(null)
   const [sessions, setSessions] = useState<SessionRecord[]>([])
   const [activeSession, setActiveSession] = useState<SessionRecord | null>(null)
@@ -569,6 +578,11 @@ function Editor(): React.JSX.Element {
   const [renameSaving, setRenameSaving] = useState(false)
   const [previewImage, setPreviewImage] = useState<ImageAsset | null>(null)
   const [screenshotNotice, setScreenshotNotice] = useState<string | null>(null)
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const storedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY))
+    return Number.isFinite(storedWidth) && storedWidth > 0 ? clampSidebarWidth(storedWidth) : DEFAULT_SIDEBAR_WIDTH
+  })
+  const [sidebarResizing, setSidebarResizing] = useState(false)
   const [nodeContextMenu, setNodeContextMenu] = useState<{
     left: number
     top: number
@@ -582,12 +596,63 @@ function Editor(): React.JSX.Element {
   const canvasRef = useRef<HTMLElement | null>(null)
   const canceledGenerationIds = useRef(new Set<string>())
   const generationStartTimes = useRef(new Map<string, number>())
+  const sidebarResizingRef = useRef(false)
+  const sidebarWidthRef = useRef(sidebarWidth)
   activeSessionIdRef.current = activeSession?.id ?? null
+  sidebarWidthRef.current = sidebarWidth
+
+  const resizeSidebar = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!sidebarResizingRef.current) return
+    const width = clampSidebarWidth(event.clientX)
+    sidebarWidthRef.current = width
+    setSidebarWidth(width)
+  }, [])
+
+  const finishSidebarResize = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!sidebarResizingRef.current) return
+    sidebarResizingRef.current = false
+    setSidebarResizing(false)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidthRef.current))
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }, [])
+
+  const startSidebarResize = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    sidebarResizingRef.current = true
+    setSidebarResizing(true)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }, [])
+
+  const resetSidebarWidth = useCallback((): void => {
+    sidebarWidthRef.current = DEFAULT_SIDEBAR_WIDTH
+    setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(DEFAULT_SIDEBAR_WIDTH))
+  }, [])
 
   useEffect(() => {
     void window.imageMixer.getComfyStatus().then(setComfy)
     return window.imageMixer.onComfyStatus(setComfy)
   }, [])
+
+  const toggleComfyUI = useCallback(async (): Promise<void> => {
+    if (comfyTogglePending || comfy.phase === 'starting' || comfy.phase === 'stopping') return
+    setComfyTogglePending(true)
+    try {
+      const status = comfy.phase === 'ready'
+        ? await window.imageMixer.stopComfyUI()
+        : await window.imageMixer.startComfyUI()
+      setComfy(status)
+    } catch (error) {
+      setComfy((current) => ({ ...current, phase: 'error', message: error instanceof Error ? error.message : String(error) }))
+    } finally {
+      setComfyTogglePending(false)
+    }
+  }, [comfy.phase, comfyTogglePending])
 
   useEffect(() => window.imageMixer.onGenerationStarted(({ sessionId, nodeId, startedAtMs }) => {
     generationStartTimes.current.set(generationJobKey(sessionId, nodeId), startedAtMs)
@@ -1215,12 +1280,20 @@ function Editor(): React.JSX.Element {
     <EditorContext.Provider value={actions}>
       <main className='app-shell'>
         <header className='topbar'>
-          <div className={`comfy-status status-${comfy.phase}`} title={comfy.message}>
-            <span />
+          <button
+            type='button'
+            className={'comfy-status status-' + comfy.phase}
+            title={comfy.phase === 'ready' && !comfy.managed ? comfy.message + '（外部プロセスはアプリからUnloadできません）' : comfy.message}
+            disabled={comfyTogglePending || comfy.phase === 'starting' || comfy.phase === 'stopping' || (comfy.phase === 'ready' && !comfy.managed)}
+            aria-pressed={comfy.phase === 'ready'}
+            onClick={() => void toggleComfyUI()}
+          >
+            <span className='comfy-status-dot' />
             <div><strong>ComfyUI</strong><small>{comfy.message}</small></div>
-          </div>
+            <span className='comfy-toggle-label'>{comfy.phase === 'ready' ? 'Unload' : comfy.phase === 'starting' ? 'Loading…' : comfy.phase === 'stopping' ? 'Unloading…' : 'Load'}</span>
+          </button>
         </header>
-        <div className='workspace'>
+        <div className='workspace' style={{ gridTemplateColumns: sidebarWidth + 'px 0 minmax(0, 1fr)' }}>
           <aside className='left-sidebar'>
             <section className='library-section'>
               <div className='sidebar-label'>ROOT FOLDER</div>
@@ -1234,7 +1307,9 @@ function Editor(): React.JSX.Element {
             <section className='sessions-section'>
               <div className='sessions-heading'>
                 <div><div className='sidebar-label'>SESSIONS</div><small>{sessions.length} sessions</small></div>
-                <button type='button' className='add-session-button' onClick={() => void createSession()} title='新規セッション'>+</button>
+                <button type='button' className='add-session-button' onClick={() => void createSession()} title='新規セッション' aria-label='新規セッション'>
+                  <svg viewBox='0 0 24 24' aria-hidden='true'><path d='M12 5v14M5 12h14' /></svg>
+                </button>
               </div>
               <div className='session-list' onScroll={() => setSessionMenuId(null)}>
                 {sessions.map((session) => (
@@ -1292,7 +1367,9 @@ function Editor(): React.JSX.Element {
                         title={`${session.name}のメニュー`}
                         aria-label={`${session.name}のメニュー`}
                         aria-expanded={sessionMenuId === session.id}
-                      >⋯</button>
+                      >
+                        <svg viewBox='0 0 24 24' aria-hidden='true'><circle cx='5' cy='12' r='1.7' /><circle cx='12' cy='12' r='1.7' /><circle cx='19' cy='12' r='1.7' /></svg>
+                      </button>
                       {sessionMenuId === session.id && sessionMenuPosition && (
                         <div className='session-menu' style={sessionMenuPosition}>
                           <button type='button' onClick={() => beginRenameSession(session)}>名前を変更</button>
@@ -1308,6 +1385,22 @@ function Editor(): React.JSX.Element {
             {sidebarError && <div className='sidebar-error'>{sidebarError}</div>}
             <div className='sidebar-footer'>変更内容は現在のセッションへ自動保存されます</div>
           </aside>
+
+          <div
+            className={sidebarResizing ? 'sidebar-resizer resizing' : 'sidebar-resizer'}
+            role='separator'
+            aria-label='左サイドバーの幅を変更'
+            aria-orientation='vertical'
+            aria-valuemin={MIN_SIDEBAR_WIDTH}
+            aria-valuemax={MAX_SIDEBAR_WIDTH}
+            aria-valuenow={sidebarWidth}
+            title='ドラッグで幅を変更・ダブルクリックでリセット'
+            onPointerDown={startSidebarResize}
+            onPointerMove={resizeSidebar}
+            onPointerUp={finishSidebarResize}
+            onLostPointerCapture={finishSidebarResize}
+            onDoubleClick={resetSidebarWidth}
+          />
 
           <section ref={canvasRef} className='canvas-wrap'>
             <ReactFlow

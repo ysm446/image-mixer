@@ -2,6 +2,8 @@ import type { ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, 
 
 export interface ImageMixerApi {
   getComfyStatus(): Promise<ComfyStatus>
+  startComfyUI(): Promise<ComfyStatus>
+  stopComfyUI(): Promise<ComfyStatus>
   bootstrapLibrary(): Promise<LibraryBootstrap>
   chooseLibrary(): Promise<LibraryBootstrap | null>
   createSession(name: string): Promise<{ session: SessionRecord; sessions: SessionRecord[]; snapshot: SessionSnapshot }>

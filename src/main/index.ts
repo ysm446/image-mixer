@@ -71,6 +71,7 @@ type GenerationJob = {
 
 let mainWindow: BrowserWindow | null = null
 let comfyProcess: ChildProcess | null = null
+let comfyStopRequested = false
 let comfyStatus: ComfyStatus = { phase: 'stopped', message: 'ComfyUI is stopped', managed: false }
 let isQuitting = false
 let libraryRoot = ''
@@ -589,8 +590,17 @@ async function waitForComfy(timeoutMs = 90_000): Promise<boolean> {
 }
 
 async function startComfyUI(): Promise<void> {
+  if (comfyStatus.phase === 'starting' || comfyStatus.phase === 'stopping') return
+  setComfyStatus({ phase: 'starting', message: 'Checking ComfyUI…', managed: comfyProcess !== null })
   if (await isComfyReady()) {
-    setComfyStatus({ phase: 'ready', message: 'Connected to an existing ComfyUI server', managed: false })
+    const managed = comfyProcess !== null
+    setComfyStatus({ phase: 'ready', message: managed ? 'ComfyUI is ready' : 'Connected to an existing ComfyUI server', managed })
+    return
+  }
+  if (comfyProcess) {
+    setComfyStatus({ phase: 'starting', message: 'Waiting for ComfyUI…', managed: true })
+    if (await waitForComfy()) setComfyStatus({ phase: 'ready', message: 'ComfyUI is ready', managed: true })
+    else setComfyStatus({ phase: 'error', message: 'Timed out while starting ComfyUI. Check data/logs/comfyui.log.', managed: true })
     return
   }
 
@@ -627,9 +637,13 @@ async function startComfyUI(): Promise<void> {
     setComfyStatus({ phase: 'error', message: `Failed to start ComfyUI: ${error.message}`, managed: true })
   })
   child.once('exit', (code) => {
+    const wasStopRequested = comfyStopRequested
+    comfyStopRequested = false
     comfyProcess = null
     if (!isQuitting) {
-      setComfyStatus({ phase: code === 0 ? 'stopped' : 'error', message: `ComfyUI exited (${code ?? 'unknown'})`, managed: true })
+      setComfyStatus(wasStopRequested
+        ? { phase: 'stopped', message: 'ComfyUI is unloaded', managed: false }
+        : { phase: code === 0 ? 'stopped' : 'error', message: 'ComfyUI exited (' + (code ?? 'unknown') + ')', managed: true })
     }
     log.end()
   })
@@ -641,10 +655,26 @@ async function startComfyUI(): Promise<void> {
   }
 }
 
-function stopComfyUI(): void {
-  if (!comfyProcess) return
-  comfyProcess.kill()
-  comfyProcess = null
+async function stopComfyUI(): Promise<void> {
+  if (!comfyProcess) {
+    if (comfyStatus.phase === 'ready' && !comfyStatus.managed) throw new Error('Externally managed ComfyUI cannot be unloaded from this app')
+    setComfyStatus({ phase: 'stopped', message: 'ComfyUI is unloaded', managed: false })
+    return
+  }
+  const process = comfyProcess
+  comfyStopRequested = true
+  setComfyStatus({ phase: 'stopping', message: 'Unloading ComfyUI…', managed: true })
+  const exited = await new Promise<boolean>((resolve) => {
+    const timeout = setTimeout(() => resolve(false), 5_000)
+    process.once('exit', () => {
+      clearTimeout(timeout)
+      resolve(true)
+    })
+    process.kill()
+  })
+  if (!exited && comfyProcess === process && !isQuitting) {
+    setComfyStatus({ phase: 'error', message: 'Timed out while unloading ComfyUI', managed: true })
+  }
 }
 
 function createWindow(): void {
@@ -934,6 +964,14 @@ async function cancelGeneration(sessionId: string, nodeId: string): Promise<bool
 
 function registerIpc(): void {
   ipcMain.handle('comfy:status', () => comfyStatus)
+  ipcMain.handle('comfy:start', async (): Promise<ComfyStatus> => {
+    await startComfyUI()
+    return comfyStatus
+  })
+  ipcMain.handle('comfy:stop', async (): Promise<ComfyStatus> => {
+    await stopComfyUI()
+    return comfyStatus
+  })
   ipcMain.handle('library:bootstrap', () => buildLibraryBootstrap())
   ipcMain.handle('library:choose', async (): Promise<LibraryBootstrap | null> => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
@@ -1000,7 +1038,7 @@ if (!hasSingleInstanceLock) {
   app.on('before-quit', () => {
     isQuitting = true
     stopSystemResourcePolling()
-    stopComfyUI()
+    void stopComfyUI()
   })
 
   app.on('window-all-closed', () => app.quit())
