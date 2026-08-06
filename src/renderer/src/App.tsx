@@ -1008,10 +1008,16 @@ function Editor(): React.JSX.Element {
         return pasted
       })
       const existingNodeIds = new Set(nodes.map((node) => node.id))
+      const occupiedExistingTargetPins = new Set(edges.map((edge) => JSON.stringify([edge.target, edge.targetHandle ?? null])))
       const pastedEdges: EditorEdge[] = clipboard.edges.flatMap((edge) => {
         const source = idMap.get(edge.source) ?? (!isCrossSessionPaste && existingNodeIds.has(edge.source) ? edge.source : null)
         const target = idMap.get(edge.target) ?? (!isCrossSessionPaste && existingNodeIds.has(edge.target) ? edge.target : null)
         if (!source || !target) return []
+        if (!idMap.has(edge.target)) {
+          const targetPinKey = JSON.stringify([target, edge.targetHandle ?? null])
+          if (occupiedExistingTargetPins.has(targetPinKey)) return []
+          occupiedExistingTargetPins.add(targetPinKey)
+        }
         return [{
           ...structuredClone(edge),
           id: crypto.randomUUID(),
@@ -1028,7 +1034,7 @@ function Editor(): React.JSX.Element {
       setSidebarError(`ノードを貼り付けられませんでした: ${error instanceof Error ? error.message : String(error)}`)
       return false
     }
-  }, [activeSession, nodes, screenToFlowPosition, setEdges, setNodes])
+  }, [activeSession, edges, nodes, screenToFlowPosition, setEdges, setNodes])
 
   useEffect(() => {
     const handleClipboardShortcut = (event: KeyboardEvent): void => {
