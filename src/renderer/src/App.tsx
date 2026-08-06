@@ -525,6 +525,7 @@ function Editor(): React.JSX.Element {
   const [hydratedSessionId, setHydratedSessionId] = useState<string | null>(null)
   const [sidebarError, setSidebarError] = useState<string | null>(null)
   const [sessionMenuId, setSessionMenuId] = useState<string | null>(null)
+  const [sessionMenuPosition, setSessionMenuPosition] = useState<{ left: number; top: number } | null>(null)
   const [renameTarget, setRenameTarget] = useState<SessionRecord | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [renameSaving, setRenameSaving] = useState(false)
@@ -1201,7 +1202,7 @@ function Editor(): React.JSX.Element {
                 <div><div className='sidebar-label'>SESSIONS</div><small>{sessions.length} sessions</small></div>
                 <button type='button' className='add-session-button' onClick={() => void createSession()} title='新規セッション'>+</button>
               </div>
-              <div className='session-list'>
+              <div className='session-list' onScroll={() => setSessionMenuId(null)}>
                 {sessions.map((session) => (
                   <div className={`session-row ${session.id === activeSession?.id ? 'active' : ''} ${sessionMenuId === session.id ? 'menu-open' : ''}`} key={session.id}>
                     {renameTarget?.id === session.id ? (
@@ -1239,13 +1240,27 @@ function Editor(): React.JSX.Element {
                       <button
                         type='button'
                         className='session-menu-button'
-                        onClick={() => setSessionMenuId((current) => current === session.id ? null : session.id)}
+                        onClick={(event) => {
+                          if (sessionMenuId === session.id) {
+                            setSessionMenuId(null)
+                            return
+                          }
+                          const rect = event.currentTarget.getBoundingClientRect()
+                          const menuWidth = 126
+                          const menuHeight = 104
+                          const opensAbove = rect.bottom + menuHeight + 8 > window.innerHeight
+                          setSessionMenuPosition({
+                            left: Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth)),
+                            top: opensAbove ? Math.max(8, rect.top - menuHeight - 4) : rect.bottom + 4
+                          })
+                          setSessionMenuId(session.id)
+                        }}
                         title={`${session.name}のメニュー`}
                         aria-label={`${session.name}のメニュー`}
                         aria-expanded={sessionMenuId === session.id}
                       >⋯</button>
-                      {sessionMenuId === session.id && (
-                        <div className='session-menu'>
+                      {sessionMenuId === session.id && sessionMenuPosition && (
+                        <div className='session-menu' style={sessionMenuPosition}>
                           <button type='button' onClick={() => beginRenameSession(session)}>名前を変更</button>
                           <button type='button' onClick={() => void duplicateSession(session)}>複製</button>
                           <button type='button' className='danger' onClick={() => { setSessionMenuId(null); void deleteSession(session) }}>削除</button>
