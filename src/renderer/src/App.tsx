@@ -34,6 +34,14 @@ function normalizeImageDimension(value: number): number {
   return Math.min(MAX_IMAGE_DIMENSION, Math.max(MIN_IMAGE_DIMENSION, rounded))
 }
 
+function imageMediaSize(width: number | undefined, height: number | undefined, fallback: { width: number; height: number }): { width: number; height: number } {
+  if (!width || !height || !Number.isFinite(width) || !Number.isFinite(height)) return fallback
+  const aspectRatio = width / height
+  return aspectRatio >= 1
+    ? { width: 360, height: Math.max(120, 360 / aspectRatio) }
+    : { width: Math.max(240, 360 * aspectRatio), height: 360 }
+}
+
 type PromptData = {
   kind: 'prompt'
   title: string
@@ -80,7 +88,7 @@ type EditorActions = {
   cancelGeneration: (nodeId: string) => Promise<void>
   copyResult: (nodeId: string) => Promise<boolean>
   saveResult: (nodeId: string) => Promise<boolean>
-  previewResult: (image: GeneratedImage) => void
+  previewResult: (image: ImageAsset) => void
 }
 
 const EditorContext = createContext<EditorActions | null>(null)
@@ -211,22 +219,20 @@ function PromptNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.El
 }
 
 function ImageNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Element {
-  const { updateNode, chooseImage, dropImage } = useEditor()
+  const { updateNode, chooseImage, dropImage, previewResult } = useEditor()
   const imageData = data as ImageData
   const [isDragging, setIsDragging] = useState(false)
   const hasSize = Boolean(imageData.image?.width && imageData.image?.height)
-  const aspectRatio = hasSize ? imageData.image!.width / imageData.image!.height : 1
-  const mediaWidth = hasSize ? (aspectRatio >= 1 ? 300 : Math.max(180, 340 * aspectRatio)) : 250
-  const mediaHeight = hasSize ? (aspectRatio >= 1 ? Math.max(100, 300 / aspectRatio) : 340) : 180
+  const mediaSize = imageMediaSize(imageData.image?.width, imageData.image?.height, { width: 250, height: 180 })
+  const mediaWidth = mediaSize.width
+  const mediaHeight = mediaSize.height
   return (
     <article className={`node-card image-node ${selected ? 'selected' : ''}`} style={{ width: mediaWidth + 30 }}>
       <div className='node-kicker'>IMAGE</div>
       <EditableNodeTitle title={imageData.title} ariaLabel='Image node title' onCommit={(title) => updateNode(id, { title })} />
-      <button
-        className={`image-picker nodrag ${isDragging ? 'is-dragging' : ''}`}
+      <div
+        className={`image-picker nodrag ${imageData.image ? 'has-image' : 'is-empty'} ${isDragging ? 'is-dragging' : ''}`}
         style={{ height: mediaHeight }}
-        type='button'
-        onClick={() => void chooseImage(id)}
         onDragEnter={(event) => { event.preventDefault(); setIsDragging(true) }}
         onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as globalThis.Node | null)) setIsDragging(false) }}
@@ -238,8 +244,37 @@ function ImageNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Ele
           if (file) void dropImage(id, file)
         }}
       >
-        {imageData.image ? <img src={imageData.image.dataUrl} alt={imageData.title} draggable={false} /> : <span>画像を選択<br /><small>またはここへドロップ</small></span>}
-      </button>
+        {imageData.image ? (
+          <>
+            <button
+              type='button'
+              className='image-node-preview nodrag'
+              title='クリックして拡大表示'
+              aria-label={`${imageData.title}を拡大表示`}
+              onClick={() => previewResult(imageData.image!)}
+            >
+              <img src={imageData.image.dataUrl} alt={imageData.title} draggable={false} />
+            </button>
+            <button
+              type='button'
+              className='image-replace-button nodrag'
+              title='画像を変更'
+              aria-label={`${imageData.title}の画像を変更`}
+              onClick={() => void chooseImage(id)}
+            >
+              <svg viewBox='0 0 24 24' aria-hidden='true'>
+                <path d='M4 5h16v14H4z' />
+                <path d='m6 16 4-4 3 3 2-2 3 3' />
+                <path d='M16 8h4M18 6v4' />
+              </svg>
+            </button>
+          </>
+        ) : (
+          <button type='button' className='image-empty-picker nodrag' onClick={() => void chooseImage(id)}>
+            <span>画像を選択<br /><small>またはここへドロップ</small></span>
+          </button>
+        )}
+      </div>
       <div className='image-meta'>
         <span className='image-name'>{imageData.image?.name ?? 'PNG / JPG / WEBP'}</span>
         {hasSize && <strong>{imageData.image!.width} × {imageData.image!.height}</strong>}
@@ -321,10 +356,9 @@ function GenerateNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.
   const [runningDurationMs, setRunningDurationMs] = useState(0)
   const previewWidth = generateData.result?.width ?? generateData.settings.width
   const previewHeight = generateData.result?.height ?? generateData.settings.height
-  const hasPreviewSize = Number.isFinite(previewWidth) && Number.isFinite(previewHeight) && previewWidth > 0 && previewHeight > 0
-  const previewAspectRatio = hasPreviewSize ? previewWidth / previewHeight : 1
-  const resultMediaWidth = hasPreviewSize ? (previewAspectRatio >= 1 ? 360 : Math.max(240, 360 * previewAspectRatio)) : 349
-  const resultMediaHeight = hasPreviewSize ? (previewAspectRatio >= 1 ? Math.max(120, 360 / previewAspectRatio) : 360) : 245
+  const resultMediaSize = imageMediaSize(previewWidth, previewHeight, { width: 349, height: 245 })
+  const resultMediaWidth = resultMediaSize.width
+  const resultMediaHeight = resultMediaSize.height
   const setSetting = (key: keyof GenerateSettings, value: number): void => {
     updateNode(id, { settings: { ...generateData.settings, [key]: value } })
   }
@@ -343,8 +377,8 @@ function GenerateNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.
   const displayedDurationMs = generateData.state === 'running' ? runningDurationMs : generateData.durationMs
   return (
     <article className={`node-card generate-node ${selected ? 'selected' : ''}`} style={{ width: resultMediaWidth + 30 }}>
-      <div className='node-kicker'>{imageEditingMode ? 'QWEN EDIT' : 'QWEN GENERATE'}</div>
-      <EditableNodeTitle title={generateData.title} ariaLabel='Generate node title' onCommit={(title) => updateNode(id, { title })} />
+      <div className='node-kicker'>{imageEditingMode ? 'IMAGE EDIT' : 'IMAGE GENERATE'}</div>
+      <EditableNodeTitle title={generateData.title} ariaLabel='Image Generate node title' onCommit={(title) => updateNode(id, { title })} />
 
       <div className='pin-label prompt-pin-label'>Prompt</div>
       <Handle type='target' position={Position.Left} id='prompt' className='handle prompt-handle pin-prompt' />
@@ -449,7 +483,7 @@ const initialNodes: EditorNode[] = [
     position: { x: 560, y: 170 },
     data: {
       kind: 'generate',
-      title: 'Qwen composition',
+      title: 'Image Generate',
       settings: { width: 768, height: 768, seed: 65454653, steps: 4, cfg: 1 },
       matchImage1Size: false,
       state: 'idle',
@@ -480,6 +514,13 @@ const initialEdges: EditorEdge[] = [
     markerEnd: { type: MarkerType.ArrowClosed }
   }
 ]
+
+function normalizeLoadedNodes(nodes: EditorNode[]): EditorNode[] {
+  return nodes.map((node) => {
+    if (node.data.kind !== 'generate' || (node.data.title !== 'Qwen Edit' && node.data.title !== 'Qwen composition')) return node
+    return { ...node, data: { ...node.data, title: 'Image Generate' } }
+  })
+}
 
 function defaultNodes(): EditorNode[] {
   return structuredClone(initialNodes)
@@ -526,7 +567,7 @@ function Editor(): React.JSX.Element {
   const [renameTarget, setRenameTarget] = useState<SessionRecord | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [renameSaving, setRenameSaving] = useState(false)
-  const [previewImage, setPreviewImage] = useState<GeneratedImage | null>(null)
+  const [previewImage, setPreviewImage] = useState<ImageAsset | null>(null)
   const [screenshotNotice, setScreenshotNotice] = useState<string | null>(null)
   const [nodeContextMenu, setNodeContextMenu] = useState<{
     left: number
@@ -633,7 +674,7 @@ function Editor(): React.JSX.Element {
     setLibrary(bootstrap.library)
     setSessions(bootstrap.sessions)
     setActiveSession(bootstrap.activeSession)
-    setNodes(hasSavedNodes ? bootstrap.snapshot.nodes as EditorNode[] : defaultNodes())
+    setNodes(hasSavedNodes ? normalizeLoadedNodes(bootstrap.snapshot.nodes as EditorNode[]) : defaultNodes())
     setEdges(hasSavedNodes ? bootstrap.snapshot.edges as EditorEdge[] : defaultEdges())
     setHydratedSessionId(bootstrap.activeSession.id)
     setSidebarError(null)
@@ -998,7 +1039,7 @@ function Editor(): React.JSX.Element {
     else if (kind === 'image') data = { kind, title: 'Image', image: null }
     else data = {
       kind,
-      title: 'Qwen Edit',
+      title: 'Image Generate',
       settings: { width: 768, height: 768, seed: Math.floor(Math.random() * 2147483647), steps: 4, cfg: 1 },
       matchImage1Size: false,
       state: 'idle',
@@ -1068,7 +1109,7 @@ function Editor(): React.JSX.Element {
       const hasSavedNodes = loaded.snapshot.nodes.length > 0
       setHydratedSessionId(null)
       setActiveSession(loaded.session)
-      setNodes(hasSavedNodes ? loaded.snapshot.nodes as EditorNode[] : defaultNodes())
+      setNodes(hasSavedNodes ? normalizeLoadedNodes(loaded.snapshot.nodes as EditorNode[]) : defaultNodes())
       setEdges(hasSavedNodes ? loaded.snapshot.edges as EditorEdge[] : defaultEdges())
       setHydratedSessionId(loaded.session.id)
       setSidebarError(null)
@@ -1087,7 +1128,7 @@ function Editor(): React.JSX.Element {
       setHydratedSessionId(null)
       setSessions(duplicated.sessions)
       setActiveSession(duplicated.session)
-      setNodes(hasSavedNodes ? duplicated.snapshot.nodes as EditorNode[] : defaultNodes())
+      setNodes(hasSavedNodes ? normalizeLoadedNodes(duplicated.snapshot.nodes as EditorNode[]) : defaultNodes())
       setEdges(hasSavedNodes ? duplicated.snapshot.edges as EditorEdge[] : defaultEdges())
       setHydratedSessionId(duplicated.session.id)
       setSidebarError(null)
@@ -1174,10 +1215,6 @@ function Editor(): React.JSX.Element {
     <EditorContext.Provider value={actions}>
       <main className='app-shell'>
         <header className='topbar'>
-          <div>
-            <h1>Image Mixer</h1>
-            <p>Node-based Qwen image composition</p>
-          </div>
           <div className={`comfy-status status-${comfy.phase}`} title={comfy.message}>
             <span />
             <div><strong>ComfyUI</strong><small>{comfy.message}</small></div>
@@ -1340,7 +1377,7 @@ function Editor(): React.JSX.Element {
             <div className='node-context-title'>ADD NODE</div>
             <button type='button' onClick={() => addNodeFromContextMenu('prompt')}><span className='node-type-dot prompt' />Prompt</button>
             <button type='button' onClick={() => addNodeFromContextMenu('image')}><span className='node-type-dot image' />Image</button>
-            <button type='button' onClick={() => addNodeFromContextMenu('generate')}><span className='node-type-dot generate' />Generate</button>
+            <button type='button' onClick={() => addNodeFromContextMenu('generate')}><span className='node-type-dot generate' />Image Generate</button>
           </div>
         )}
         {screenshotNotice && (
@@ -1362,10 +1399,10 @@ function Editor(): React.JSX.Element {
               className='image-preview-dialog'
               role='dialog'
               aria-modal='true'
-              aria-label='生成画像の拡大表示'
+              aria-label='画像の拡大表示'
               onPointerDown={(event) => event.stopPropagation()}
             >
-              <img src={previewImage.dataUrl} alt='Generated result preview' draggable={false} />
+              <img src={previewImage.dataUrl} alt={`${previewImage.name} preview`} draggable={false} />
               {previewImage.width && previewImage.height && <div className='image-preview-resolution'>{previewImage.width} × {previewImage.height}</div>}
             </div>
           </div>
