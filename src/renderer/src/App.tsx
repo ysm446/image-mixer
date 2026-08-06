@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   addEdge,
   Background,
@@ -91,43 +91,103 @@ function useEditor(): EditorActions {
   return value
 }
 
+type EditableNodeTitleProps = {
+  title: string
+  ariaLabel: string
+  onCommit: (title: string) => void
+}
+
+function EditableNodeTitle({ title, ariaLabel, onCommit }: EditableNodeTitleProps): React.JSX.Element {
+  const [isEditing, setIsEditing] = useState(false)
+  const [draft, setDraft] = useState(title)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const isComposing = useRef(false)
+
+  useEffect(() => {
+    if (!isEditing) setDraft(title)
+  }, [isEditing, title])
+
+  useLayoutEffect(() => {
+    if (!isEditing) return
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [isEditing])
+
+  const commit = (): void => {
+    onCommit(draft)
+    setIsEditing(false)
+  }
+
+  if (isEditing) {
+    return (
+      <div className='node-title-row'>
+        <input
+          ref={inputRef}
+          className='node-title nodrag nopan'
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onCompositionStart={() => { isComposing.current = true }}
+          onCompositionEnd={() => { isComposing.current = false }}
+          onKeyDown={(event) => {
+            event.stopPropagation()
+            if (event.key === 'Enter' && !isComposing.current) {
+              event.preventDefault()
+              commit()
+            } else if (event.key === 'Escape') {
+              event.preventDefault()
+              setDraft(title)
+              setIsEditing(false)
+            }
+          }}
+          onKeyUp={(event) => event.stopPropagation()}
+          aria-label={ariaLabel}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className='node-title-row'>
+      <div className='node-title-display' title={title}>{title || 'Untitled'}</div>
+      <button
+        type='button'
+        className='node-title-edit nodrag nopan'
+        title='タイトルを編集'
+        aria-label={`${ariaLabel}を編集`}
+        onClick={() => setIsEditing(true)}
+      >
+        <svg viewBox='0 0 24 24' aria-hidden='true'><path d='m4 16-.8 4.8L8 20l10.7-10.7-4-4L4 16Z' /><path d='m13.5 6.5 4 4' /></svg>
+      </button>
+    </div>
+  )
+}
+
 function PromptNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Element {
   const { updateNode } = useEditor()
   const prompt = data as PromptData
-  const [draftTitle, setDraftTitle] = useState(prompt.title)
   const [draftText, setDraftText] = useState(prompt.text)
-  const isTitleComposing = useRef(false)
   const isTextComposing = useRef(false)
-
-  useEffect(() => {
-    if (!isTitleComposing.current) setDraftTitle(prompt.title)
-  }, [prompt.title])
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
     if (!isTextComposing.current) setDraftText(prompt.text)
   }, [prompt.text])
 
+  useLayoutEffect(() => {
+    const editor = textAreaRef.current
+    if (!editor) return
+    editor.style.height = 'auto'
+    const borderHeight = editor.offsetHeight - editor.clientHeight
+    editor.style.height = `${Math.max(150, editor.scrollHeight + borderHeight)}px`
+  }, [draftText])
+
   return (
     <article className={`node-card prompt-node ${selected ? 'selected' : ''}`}>
       <div className='node-kicker'>PROMPT</div>
-      <input
-        className='node-title nodrag nopan'
-        value={draftTitle}
-        onChange={(event) => {
-          setDraftTitle(event.target.value)
-          if (!isTitleComposing.current) updateNode(id, { title: event.target.value })
-        }}
-        onCompositionStart={() => { isTitleComposing.current = true }}
-        onCompositionEnd={(event) => {
-          isTitleComposing.current = false
-          setDraftTitle(event.currentTarget.value)
-          updateNode(id, { title: event.currentTarget.value })
-        }}
-        onKeyDown={(event) => event.stopPropagation()}
-        onKeyUp={(event) => event.stopPropagation()}
-        aria-label='Prompt node title'
-      />
+      <EditableNodeTitle title={prompt.title} ariaLabel='Prompt node title' onCommit={(title) => updateNode(id, { title })} />
       <textarea
+        ref={textAreaRef}
         className='prompt-editor nodrag nopan nowheel'
         value={draftText}
         onChange={(event) => {
@@ -161,12 +221,7 @@ function ImageNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Ele
   return (
     <article className={`node-card image-node ${selected ? 'selected' : ''}`} style={{ width: mediaWidth + 30 }}>
       <div className='node-kicker'>IMAGE</div>
-      <input
-        className='node-title nodrag'
-        value={imageData.title}
-        onChange={(event) => updateNode(id, { title: event.target.value })}
-        aria-label='Image node title'
-      />
+      <EditableNodeTitle title={imageData.title} ariaLabel='Image node title' onCommit={(title) => updateNode(id, { title })} />
       <button
         className={`image-picker nodrag ${isDragging ? 'is-dragging' : ''}`}
         style={{ height: mediaHeight }}
@@ -289,12 +344,7 @@ function GenerateNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.
   return (
     <article className={`node-card generate-node ${selected ? 'selected' : ''}`} style={{ width: resultMediaWidth + 30 }}>
       <div className='node-kicker'>{imageEditingMode ? 'QWEN EDIT' : 'QWEN GENERATE'}</div>
-      <input
-        className='node-title nodrag'
-        value={generateData.title}
-        onChange={(event) => updateNode(id, { title: event.target.value })}
-        aria-label='Generate node title'
-      />
+      <EditableNodeTitle title={generateData.title} ariaLabel='Generate node title' onCommit={(title) => updateNode(id, { title })} />
 
       <div className='pin-label prompt-pin-label'>Prompt</div>
       <Handle type='target' position={Position.Left} id='prompt' className='handle prompt-handle pin-prompt' />

@@ -114,9 +114,14 @@ button { color: inherit; }
 .image-node { --node-accent: #45b8ff; --node-accent-glow: #45b8ff38; }
 .generate-node { --node-accent: #ff9a52; --node-accent-glow: #ff9a5238; transition: width .18s ease; }
 .node-kicker { margin-bottom: 5px; color: #77869a; font-size: 9px; font-weight: 800; letter-spacing: .17em; }
-.node-title { width: 100%; border: 0; border-bottom: 1px solid transparent; outline: 0; background: transparent; color: #f2f5f9; font-size: 15px; font-weight: 700; }
+.node-title-row { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 23px; }
+.node-title { flex: 1; min-width: 0; width: 100%; border: 0; border-bottom: 1px solid transparent; outline: 0; background: transparent; color: #f2f5f9; font-size: 15px; font-weight: 700; }
 .node-title:focus { border-bottom-color: #4c596a; }
-.prompt-editor { width: 100%; min-height: 150px; margin-top: 13px; resize: vertical; border: 1px solid #303a48; border-radius: 9px; outline: none; padding: 10px; background: #0d1219; color: #dfe7f2; font-size: 12px; line-height: 1.55; }
+.node-title-display { flex: 1; min-width: 0; overflow: hidden; color: #f2f5f9; font-size: 15px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.node-title-edit { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid transparent; border-radius: 6px; padding: 3px; background: transparent; color: #718096; cursor: pointer; }
+.node-title-edit:hover { border-color: #3f4b5b; background: #222b37; color: #d8e2ef; }
+.node-title-edit svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.prompt-editor { width: 100%; min-height: 150px; margin-top: 13px; overflow: hidden; resize: none; border: 1px solid #303a48; border-radius: 9px; outline: none; padding: 10px; background: #0d1219; color: #dfe7f2; font-size: 12px; line-height: 1.55; }
 .prompt-editor:focus { border-color: #8e65d1; }
 .node-hint { margin: 8px 0 0; color: #667286; font-size: 9px; }
 .image-picker { display: grid; place-items: center; width: 100%; min-height: 100px; margin-top: 12px; overflow: hidden; border: 1px dashed #3a4b60; border-radius: 10px; background: #0b1118; color: #77889d; cursor: pointer; }
