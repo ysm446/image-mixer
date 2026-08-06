@@ -941,7 +941,7 @@ function Editor(): React.JSX.Element {
         data: structuredClone(node.data)
       })),
       edges: edges
-        .filter((edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target))
+        .filter((edge) => selectedIds.has(edge.source) || selectedIds.has(edge.target))
         .map((edge) => structuredClone({ ...edge, selected: false })),
       boundsCenter: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 },
       pasteCount: 0
@@ -1007,13 +1007,19 @@ function Editor(): React.JSX.Element {
         }
         return pasted
       })
-      const pastedEdges: EditorEdge[] = clipboard.edges.map((edge) => ({
-        ...structuredClone(edge),
-        id: crypto.randomUUID(),
-        source: idMap.get(edge.source)!,
-        target: idMap.get(edge.target)!,
-        selected: false
-      }))
+      const existingNodeIds = new Set(nodes.map((node) => node.id))
+      const pastedEdges: EditorEdge[] = clipboard.edges.flatMap((edge) => {
+        const source = idMap.get(edge.source) ?? (!isCrossSessionPaste && existingNodeIds.has(edge.source) ? edge.source : null)
+        const target = idMap.get(edge.target) ?? (!isCrossSessionPaste && existingNodeIds.has(edge.target) ? edge.target : null)
+        if (!source || !target) return []
+        return [{
+          ...structuredClone(edge),
+          id: crypto.randomUUID(),
+          source,
+          target,
+          selected: false
+        }]
+      })
       setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...pastedNodes])
       setEdges((current) => [...current.map((edge) => ({ ...edge, selected: false })), ...pastedEdges])
       setSidebarError(null)
@@ -1022,7 +1028,7 @@ function Editor(): React.JSX.Element {
       setSidebarError(`ノードを貼り付けられませんでした: ${error instanceof Error ? error.message : String(error)}`)
       return false
     }
-  }, [activeSession, screenToFlowPosition, setEdges, setNodes])
+  }, [activeSession, nodes, screenToFlowPosition, setEdges, setNodes])
 
   useEffect(() => {
     const handleClipboardShortcut = (event: KeyboardEvent): void => {
