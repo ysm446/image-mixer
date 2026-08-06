@@ -40,8 +40,8 @@ button { color: inherit; }
 .add-session-button { width: 27px; height: 27px; border: 1px solid #394455; border-radius: 7px; background: #171e28; color: #b9c5d5; font-size: 17px; cursor: pointer; }
 .add-session-button:hover { border-color: #718198; background: #202a37; }
 .session-list { min-height: 0; overflow-y: auto; }
-.session-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; margin-bottom: 4px; border: 1px solid transparent; border-radius: 8px; transition: margin-bottom .14s ease; }
-.session-row.menu-open { margin-bottom: 100px; }
+.session-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; margin-bottom: 4px; border: 1px solid transparent; border-radius: 8px; }
+.session-row.menu-open { z-index: 2; }
 .session-row:hover { background: #151c26; }
 .session-row.active { border-color: #3c4d62; background: linear-gradient(90deg, #1b2a3a, #17202b); }
 .session-main { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: center; gap: 9px; min-width: 0; border: 0; padding: 9px 7px; background: transparent; text-align: left; cursor: pointer; }
