@@ -1,4 +1,4 @@
-import type { ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, LibraryBootstrap, SessionRecord, SessionSnapshot, SystemResources } from '../main/types'
+import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, LibraryBootstrap, SessionRecord, SessionSnapshot, SystemResources } from '../main/types'
 
 export interface ImageMixerApi {
   getComfyStatus(): Promise<ComfyStatus>
@@ -13,6 +13,11 @@ export interface ImageMixerApi {
   saveSession(sessionId: string, snapshot: SessionSnapshot): Promise<SessionRecord>
   copySessionAssets(sourceSessionId: string, targetSessionId: string, sourcePaths: string[]): Promise<CopiedSessionAsset[]>
   deleteSession(sessionId: string): Promise<LibraryBootstrap>
+  chooseBatchFolder(): Promise<BatchFolderSelection | null>
+  prepareBatchFolder(inputDirectory: string): Promise<BatchPreparation>
+  saveBatchGeneratedImage(sessionId: string, generated: GeneratedImage, inputPath: string, outputDirectory: string, index: number): Promise<GeneratedImage>
+  writeBatchManifest(outputDirectory: string, manifest: BatchManifest): Promise<void>
+  revealBatchOutput(outputDirectory: string): Promise<void>
   chooseImage(sessionId: string): Promise<ImageAsset | null>
   importDroppedImage(file: File, sessionId: string): Promise<ImageAsset>
   generateImage(request: GenerateRequest): Promise<GeneratedImage>

@@ -19,7 +19,7 @@ import {
   type NodeProps
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { ComfyStatus, GeneratedImage, GenerateSettings, ImageAsset, LibraryBootstrap, LibraryInfo, SessionRecord, SessionSnapshot } from '../../main/types'
+import type { BatchFolderSelection, BatchManifest, BatchManifestItem, ComfyStatus, GeneratedImage, GenerateSettings, ImageAsset, LibraryBootstrap, LibraryInfo, SessionRecord, SessionSnapshot, SessionViewport } from '../../main/types'
 import { SystemResourceMonitor } from './SystemResourceMonitor'
 
 type RenderState = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
@@ -74,7 +74,26 @@ type GenerateData = {
   startedAtMs?: number | null
 }
 
-type EditorData = (PromptData | ImageData | GenerateData) & Record<string, unknown>
+type BatchGenerateData = {
+  kind: 'batch-generate'
+  title: string
+  folder: BatchFolderSelection | null
+  settings: GenerateSettings
+  matchInputSize: boolean
+  state: RenderState
+  result: GeneratedImage | null
+  outputDirectory: string | null
+  total: number
+  completed: number
+  succeeded: number
+  failed: number
+  currentFile: string | null
+  error: string | null
+  durationMs?: number | null
+  startedAtMs?: number | null
+}
+
+type EditorData = (PromptData | ImageData | GenerateData | BatchGenerateData) & Record<string, unknown>
 type EditorNode = Node<EditorData, 'editor'>
 type EditorEdge = Edge
 
@@ -90,6 +109,10 @@ type EditorActions = {
   comfyReady: boolean
   hasImageInput: (nodeId: string) => boolean
   updateNode: (nodeId: string, patch: Partial<EditorData>) => void
+  chooseBatchFolder: (nodeId: string) => Promise<void>
+  runBatch: (nodeId: string) => Promise<void>
+  cancelBatch: (nodeId: string) => Promise<void>
+  revealBatchOutput: (nodeId: string) => Promise<void>
   chooseImage: (nodeId: string) => Promise<void>
   dropImage: (nodeId: string, file: File) => Promise<void>
   generate: (nodeId: string) => Promise<void>
@@ -466,9 +489,93 @@ function GenerateNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.
   )
 }
 
+function BatchGenerateNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Element {
+  const { comfyReady, updateNode, chooseBatchFolder, runBatch, cancelBatch, revealBatchOutput, previewResult } = useEditor()
+  const batchData = data as BatchGenerateData
+  const active = batchData.state === 'queued' || batchData.state === 'running'
+  const [runningDurationMs, setRunningDurationMs] = useState(0)
+  const progress = batchData.total > 0 ? Math.min(100, (batchData.completed / batchData.total) * 100) : 0
+  const resultSize = imageMediaSize(batchData.result?.width, batchData.result?.height, { width: 360, height: 180 })
+  const setSetting = (key: keyof GenerateSettings, value: number): void => {
+    updateNode(id, { settings: { ...batchData.settings, [key]: value } })
+  }
+  useEffect(() => {
+    if (batchData.state !== 'running' || batchData.startedAtMs == null) return
+    const updateDuration = (): void => setRunningDurationMs(Math.max(0, Date.now() - batchData.startedAtMs!))
+    updateDuration()
+    const timer = window.setInterval(updateDuration, 100)
+    return () => window.clearInterval(timer)
+  }, [batchData.startedAtMs, batchData.state])
+  const displayedDurationMs = batchData.state === 'running' ? runningDurationMs : batchData.durationMs
+  return (
+    <article className={'node-card batch-generate-node ' + (selected ? 'selected' : '')} style={{ width: 390 }}>
+      <div className='node-kicker'>BATCH IMAGE GENERATE</div>
+      <EditableNodeTitle title={batchData.title} ariaLabel='Batch Image Generate node title' onCommit={(title) => updateNode(id, { title })} />
+
+      <div className='pin-label prompt-pin-label'>Prompt</div>
+      <Handle type='target' position={Position.Left} id='prompt' className='handle prompt-handle pin-prompt' />
+      <div className='pin-label image-pin-label pin-label-2'>Image 2</div>
+      <div className='pin-label image-pin-label pin-label-3'>Image 3</div>
+      <Handle type='target' position={Position.Left} id='image2' className='handle image-handle pin-image-2' />
+      <Handle type='target' position={Position.Left} id='image3' className='handle image-handle pin-image-3' />
+
+      <button type='button' className='batch-folder-picker nodrag' disabled={active} onClick={() => void chooseBatchFolder(id)}>
+        <svg viewBox='0 0 24 24' aria-hidden='true'><path d='M3 6h7l2 2h9v10H3z' /></svg>
+        <span><strong>{batchData.folder?.name ?? '入力フォルダを選択'}</strong><small>{batchData.folder ? batchData.folder.path : 'フォルダ直下の画像を順次処理します'}</small></span>
+        <em>{batchData.folder ? batchData.folder.imageCount + ' images' : 'Browse'}</em>
+      </button>
+
+      <div className='settings-grid batch-settings-grid'>
+        <div className='size-settings-row'>
+          <NumberField label='Width' value={batchData.settings.width} min={MIN_IMAGE_DIMENSION} max={MAX_IMAGE_DIMENSION} step={IMAGE_DIMENSION_STEP} normalize={normalizeImageDimension} onChange={(value) => setSetting('width', value)} />
+          <NumberField label='Height' value={batchData.settings.height} min={MIN_IMAGE_DIMENSION} max={MAX_IMAGE_DIMENSION} step={IMAGE_DIMENSION_STEP} normalize={normalizeImageDimension} onChange={(value) => setSetting('height', value)} />
+        </div>
+        <label className='match-size-toggle nodrag nopan'>
+          <input type='checkbox' checked={batchData.matchInputSize} onChange={(event) => updateNode(id, { matchInputSize: event.target.checked })} />
+          <span>各入力画像のサイズに合わせる</span>
+        </label>
+        <NumberField label='Seed' value={batchData.settings.seed} min={0} max={2147483647} step={1} onChange={(value) => setSetting('seed', value)} onRandomize={() => setSetting('seed', crypto.getRandomValues(new Uint32Array(1))[0] % 2147483648)} />
+        <NumberField label='Steps' value={batchData.settings.steps} min={1} max={100} step={1} onChange={(value) => setSetting('steps', value)} />
+        <NumberField label='CFG' value={batchData.settings.cfg} min={0} max={100} step={0.1} onChange={(value) => setSetting('cfg', value)} />
+      </div>
+
+      {(active || batchData.completed > 0) && (
+        <div className='batch-progress'>
+          <div className='batch-progress-summary'><span>{batchData.currentFile ?? (batchData.state === 'succeeded' ? '完了' : '待機中')}</span><strong>{batchData.completed} / {batchData.total}</strong></div>
+          <div className='batch-progress-track'><span style={{ width: progress + '%' }} /></div>
+          <div className='batch-progress-counts'><span className='success'>成功 {batchData.succeeded}</span><span className='failed'>失敗 {batchData.failed}</span></div>
+        </div>
+      )}
+
+      <div className='result-frame batch-result-frame' style={{ height: batchData.result ? resultSize.height : 180 }}>
+        {batchData.result ? (
+          <button type='button' className='result-preview-button nodrag' title='最新結果を拡大表示' onClick={() => previewResult(batchData.result!)}>
+            <img src={batchData.result.dataUrl} alt='Latest batch result' draggable={false} />
+          </button>
+        ) : active ? <span className='spinner' /> : <span className='result-placeholder'>Latest result</span>}
+      </div>
+
+      {batchData.outputDirectory && (
+        <button type='button' className='batch-output-button nodrag' onClick={() => void revealBatchOutput(id)} title={batchData.outputDirectory}>
+          出力フォルダを開く
+        </button>
+      )}
+      {displayedDurationMs != null && <div className='generation-duration'><span>{batchData.state === 'running' ? '経過時間' : batchData.state === 'canceled' ? 'キャンセルまで' : '処理時間'}</span><strong>{formatDuration(displayedDurationMs)}</strong></div>}
+      {batchData.error && <div className='node-error'>{batchData.error}</div>}
+      {batchData.state === 'canceled' && <div className='node-canceled'>一括処理をキャンセルしました</div>}
+      {active ? (
+        <button type='button' className='cancel-generation-button nodrag' onClick={() => void cancelBatch(id)}>Cancel Batch</button>
+      ) : (
+        <button type='button' className='generate-button nodrag' disabled={!comfyReady || !batchData.folder} onClick={() => void runBatch(id)}>Start Batch</button>
+      )}
+    </article>
+  )
+}
+
 function EditorNodeComponent(props: NodeProps<EditorNode>): React.JSX.Element {
   if (props.data.kind === 'prompt') return <PromptNode {...props} />
   if (props.data.kind === 'image') return <ImageNode {...props} />
+  if (props.data.kind === 'batch-generate') return <BatchGenerateNode {...props} />
   return <GenerateNode {...props} />
 }
 
@@ -525,6 +632,9 @@ const initialEdges: EditorEdge[] = [
 
 function normalizeLoadedNodes(nodes: EditorNode[]): EditorNode[] {
   return nodes.map((node) => {
+    if (node.data.kind === 'batch-generate' && (node.data.state === 'queued' || node.data.state === 'running')) {
+      return { ...node, data: { ...node.data, state: 'canceled', currentFile: null, error: null, startedAtMs: null } }
+    }
     if (node.data.kind !== 'generate' || (node.data.title !== 'Qwen Edit' && node.data.title !== 'Qwen composition')) return node
     return { ...node, data: { ...node.data, title: 'Image Generate' } }
   })
@@ -561,7 +671,7 @@ function generationJobKey(sessionId: string, nodeId: string): string {
 }
 
 function Editor(): React.JSX.Element {
-  const { fitView, getNodes, screenToFlowPosition } = useReactFlow()
+  const { fitView, getNodes, getViewport, screenToFlowPosition, setViewport } = useReactFlow()
   const [nodes, setNodes, onNodesChange] = useNodesState<EditorNode>(defaultNodes())
   const [edges, setEdges, onEdgesChange] = useEdgesState<EditorEdge>(defaultEdges())
   const [comfy, setComfy] = useState<ComfyStatus>({ phase: 'starting', message: 'Checking ComfyUI…', managed: false })
@@ -570,6 +680,8 @@ function Editor(): React.JSX.Element {
   const [sessions, setSessions] = useState<SessionRecord[]>([])
   const [activeSession, setActiveSession] = useState<SessionRecord | null>(null)
   const [hydratedSessionId, setHydratedSessionId] = useState<string | null>(null)
+  const [canvasViewport, setCanvasViewport] = useState<SessionViewport | null>(null)
+  const [viewportRestoreRevision, setViewportRestoreRevision] = useState(0)
   const [sidebarError, setSidebarError] = useState<string | null>(null)
   const [sessionMenuId, setSessionMenuId] = useState<string | null>(null)
   const [sessionMenuPosition, setSessionMenuPosition] = useState<{ left: number; top: number } | null>(null)
@@ -596,6 +708,9 @@ function Editor(): React.JSX.Element {
   const canvasRef = useRef<HTMLElement | null>(null)
   const canceledGenerationIds = useRef(new Set<string>())
   const generationStartTimes = useRef(new Map<string, number>())
+  const batchCancelRequested = useRef(new Set<string>())
+  const batchCurrentJobIds = useRef(new Map<string, string>())
+  const viewportToRestore = useRef<SessionViewport | null>(null)
   const sidebarResizingRef = useRef(false)
   const sidebarWidthRef = useRef(sidebarWidth)
   activeSessionIdRef.current = activeSession?.id ?? null
@@ -741,9 +856,23 @@ function Editor(): React.JSX.Element {
     setActiveSession(bootstrap.activeSession)
     setNodes(hasSavedNodes ? normalizeLoadedNodes(bootstrap.snapshot.nodes as EditorNode[]) : defaultNodes())
     setEdges(hasSavedNodes ? bootstrap.snapshot.edges as EditorEdge[] : defaultEdges())
+    viewportToRestore.current = bootstrap.snapshot.viewport ?? null
+    setCanvasViewport(bootstrap.snapshot.viewport ?? null)
+    setViewportRestoreRevision((current) => current + 1)
     setHydratedSessionId(bootstrap.activeSession.id)
     setSidebarError(null)
   }, [setEdges, setNodes])
+
+  useEffect(() => {
+    if (!activeSession || hydratedSessionId !== activeSession.id) return
+    const frame = window.requestAnimationFrame(() => {
+      const savedViewport = viewportToRestore.current
+      viewportToRestore.current = null
+      if (savedViewport) void setViewport(savedViewport, { duration: 0 })
+      else void fitView({ padding: 0.1 })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [activeSession?.id, fitView, hydratedSessionId, setViewport, viewportRestoreRevision])
 
   useEffect(() => {
     void window.imageMixer.bootstrapLibrary().then(applyBootstrap).catch((error: unknown) => {
@@ -755,7 +884,7 @@ function Editor(): React.JSX.Element {
     if (!activeSession || hydratedSessionId !== activeSession.id) return
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
-      const snapshot: SessionSnapshot = { nodes, edges }
+      const snapshot: SessionSnapshot = { nodes, edges, viewport: canvasViewport ?? getViewport() }
       void window.imageMixer.saveSession(activeSession.id, snapshot).catch((error: unknown) => {
         setSidebarError(error instanceof Error ? error.message : String(error))
       })
@@ -763,11 +892,20 @@ function Editor(): React.JSX.Element {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
-  }, [activeSession, edges, hydratedSessionId, nodes])
+  }, [activeSession, canvasViewport, edges, getViewport, hydratedSessionId, nodes])
 
   const updateNode = useCallback((nodeId: string, patch: Partial<EditorData>) => {
     setNodes((current) => current.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, ...patch } as EditorData } : node))
   }, [setNodes])
+
+  const chooseBatchFolder = useCallback(async (nodeId: string) => {
+    try {
+      const folder = await window.imageMixer.chooseBatchFolder()
+      if (folder) updateNode(nodeId, { folder, error: null })
+    } catch (error) {
+      updateNode(nodeId, { error: error instanceof Error ? error.message : String(error) })
+    }
+  }, [updateNode])
 
   const chooseImage = useCallback(async (nodeId: string) => {
     if (!activeSession) return
@@ -876,6 +1014,152 @@ function Editor(): React.JSX.Element {
       }
     }
   }, [activeSession, edges, nodes, updateNode])
+
+  const runBatch = useCallback(async (nodeId: string) => {
+    if (!activeSession) return
+    const sessionId = activeSession.id
+    const target = nodes.find((node) => node.id === nodeId)
+    if (!target || target.data.kind !== 'batch-generate' || !target.data.folder || target.data.state === 'running') return
+    const promptEdge = edges.find((edge) => edge.target === nodeId && edge.targetHandle === 'prompt')
+    const promptNode = nodes.find((node) => node.id === promptEdge?.source)
+    const prompt = promptNode?.data.kind === 'prompt' ? promptNode.data.text.trim() : ''
+    if (!prompt) {
+      updateNode(nodeId, { state: 'failed', error: 'Promptノードを接続し、テキストを入力してください。' })
+      return
+    }
+
+    const referencePaths: Array<string | null> = []
+    const referenceSourceNodeIds: Array<string | null> = []
+    for (const handle of ['image2', 'image3']) {
+      const edge = edges.find((candidate) => candidate.target === nodeId && candidate.targetHandle === handle)
+      const source = nodes.find((node) => node.id === edge?.source)
+      if (source?.data.kind === 'image' && source.data.image) {
+        referencePaths.push(source.data.image.path)
+        referenceSourceNodeIds.push(null)
+      } else if (source?.data.kind === 'generate') {
+        if (!source.data.result && source.data.state !== 'queued' && source.data.state !== 'running') {
+          updateNode(nodeId, { state: 'failed', error: handle + 'へ結果のあるImage Generateノードを接続してください。' })
+          return
+        }
+        referencePaths.push(source.data.result?.path ?? null)
+        referenceSourceNodeIds.push(source.id)
+      } else {
+        referencePaths.push(null)
+        referenceSourceNodeIds.push(null)
+        if (edge) {
+          updateNode(nodeId, { state: 'failed', error: handle + 'へ解像度を取得できる画像を接続してください。' })
+          return
+        }
+      }
+    }
+
+    const batchKey = generationJobKey(sessionId, nodeId)
+    const startedAtMs = Date.now()
+    batchCancelRequested.current.delete(batchKey)
+    updateNode(nodeId, { state: 'running', error: null, outputDirectory: null, total: 0, completed: 0, succeeded: 0, failed: 0, currentFile: 'フォルダを確認中…', durationMs: null, startedAtMs })
+    try {
+      const preparation = await window.imageMixer.prepareBatchFolder(target.data.folder.path)
+      const manifestItems: BatchManifestItem[] = []
+      let succeeded = 0
+      let failed = 0
+      let completed = 0
+      let latestResult: GeneratedImage | null = null
+      updateNode(nodeId, { folder: { ...target.data.folder, imageCount: preparation.files.length }, outputDirectory: preparation.outputDirectory, total: preparation.files.length, currentFile: preparation.files[0]?.name ?? null })
+
+      for (let index = 0; index < preparation.files.length; index += 1) {
+        if (batchCancelRequested.current.has(batchKey)) break
+        const file = preparation.files[index]
+        updateNode(nodeId, { currentFile: file.name })
+        let settings = { ...target.data.settings, width: normalizeImageDimension(target.data.settings.width), height: normalizeImageDimension(target.data.settings.height) }
+        if (target.data.matchInputSize) {
+          if (!file.width || !file.height) {
+            failed += 1
+            completed += 1
+            manifestItems.push({ inputPath: file.path, outputPath: null, seed: settings.seed, settings, error: '画像サイズを取得できませんでした。' })
+            updateNode(nodeId, { completed, succeeded, failed })
+            continue
+          }
+          const scale = Math.min(1, MAX_IMAGE_DIMENSION / file.width, MAX_IMAGE_DIMENSION / file.height)
+          settings = { ...settings, width: normalizeImageDimension(file.width * scale), height: normalizeImageDimension(file.height * scale) }
+        }
+        const jobNodeId = nodeId + '-batch-' + crypto.randomUUID()
+        batchCurrentJobIds.current.set(batchKey, jobNodeId)
+        try {
+          const generated = await window.imageMixer.generateImage({
+            nodeId: jobNodeId,
+            sessionId,
+            prompt,
+            imagePaths: [file.path, ...referencePaths],
+            imageSourceNodeIds: [null, ...referenceSourceNodeIds],
+            settings,
+            transient: true
+          })
+          const saved = await window.imageMixer.saveBatchGeneratedImage(sessionId, generated, file.path, preparation.outputDirectory, index)
+          latestResult = saved
+          succeeded += 1
+          manifestItems.push({ inputPath: file.path, outputPath: saved.path, seed: settings.seed, settings, error: null })
+        } catch (error) {
+          if (batchCancelRequested.current.has(batchKey) || (error instanceof Error && error.message === 'Generation canceled')) break
+          failed += 1
+          manifestItems.push({ inputPath: file.path, outputPath: null, seed: settings.seed, settings, error: error instanceof Error ? error.message : String(error) })
+        } finally {
+          generationStartTimes.current.delete(generationJobKey(sessionId, jobNodeId))
+          batchCurrentJobIds.current.delete(batchKey)
+        }
+        completed += 1
+        updateNode(nodeId, { completed, succeeded, failed, result: latestResult })
+      }
+
+      const canceled = batchCancelRequested.current.has(batchKey)
+      const manifest: BatchManifest = {
+        createdAt: new Date().toISOString(),
+        inputDirectory: preparation.inputDirectory,
+        outputDirectory: preparation.outputDirectory,
+        prompt,
+        settings: target.data.settings,
+        matchInputSize: target.data.matchInputSize,
+        items: manifestItems
+      }
+      await window.imageMixer.writeBatchManifest(preparation.outputDirectory, manifest)
+      updateNode(nodeId, {
+        state: canceled ? 'canceled' : succeeded === 0 && failed > 0 ? 'failed' : 'succeeded',
+        result: latestResult,
+        completed,
+        succeeded,
+        failed,
+        currentFile: null,
+        error: !canceled && failed > 0 ? failed + '件の処理に失敗しました。batch-result.jsonを確認してください。' : null,
+        durationMs: Date.now() - startedAtMs,
+        startedAtMs: null
+      })
+    } catch (error) {
+      updateNode(nodeId, { state: batchCancelRequested.current.has(batchKey) ? 'canceled' : 'failed', currentFile: null, error: batchCancelRequested.current.has(batchKey) ? null : error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAtMs, startedAtMs: null })
+    } finally {
+      batchCurrentJobIds.current.delete(batchKey)
+      batchCancelRequested.current.delete(batchKey)
+    }
+  }, [activeSession, edges, nodes, updateNode])
+
+  const cancelBatch = useCallback(async (nodeId: string) => {
+    if (!activeSession) return
+    const batchKey = generationJobKey(activeSession.id, nodeId)
+    batchCancelRequested.current.add(batchKey)
+    const currentJobId = batchCurrentJobIds.current.get(batchKey)
+    if (currentJobId) {
+      try { await window.imageMixer.cancelGeneration(activeSession.id, currentJobId) } catch { /* The batch loop records the final state. */ }
+    }
+    updateNode(nodeId, { state: 'canceled', currentFile: null, error: null })
+  }, [activeSession, updateNode])
+
+  const revealBatchOutput = useCallback(async (nodeId: string) => {
+    const target = nodes.find((node) => node.id === nodeId)
+    if (!target || target.data.kind !== 'batch-generate' || !target.data.outputDirectory) return
+    try {
+      await window.imageMixer.revealBatchOutput(target.data.outputDirectory)
+    } catch (error) {
+      updateNode(nodeId, { error: error instanceof Error ? error.message : String(error) })
+    }
+  }, [nodes, updateNode])
 
   const cancelGeneration = useCallback(async (nodeId: string) => {
     if (!activeSession) return
@@ -1005,6 +1289,12 @@ function Editor(): React.JSX.Element {
           pasted.data.error = null
           pasted.data.startedAtMs = null
         }
+        if (pasted.data.kind === 'batch-generate' && (pasted.data.state === 'queued' || pasted.data.state === 'running')) {
+          pasted.data.state = 'canceled'
+          pasted.data.currentFile = null
+          pasted.data.error = null
+          pasted.data.startedAtMs = null
+        }
         return pasted
       })
       const existingNodeIds = new Set(nodes.map((node) => node.id))
@@ -1069,7 +1359,7 @@ function Editor(): React.JSX.Element {
     if (!connection.source || !connection.target || !connection.targetHandle || connection.source === connection.target) return false
     const source = nodes.find((node) => node.id === connection.source)
     const target = nodes.find((node) => node.id === connection.target)
-    if (!source || !target || target.data.kind !== 'generate') return false
+    if (!source || !target || (target.data.kind !== 'generate' && target.data.kind !== 'batch-generate')) return false
     if (connection.targetHandle === 'prompt' && source.data.kind !== 'prompt') return false
     if (connection.targetHandle.startsWith('image') && source.data.kind !== 'image' && source.data.kind !== 'generate') return false
     if (hasPath(edges, connection.target, connection.source)) return false
@@ -1114,6 +1404,24 @@ function Editor(): React.JSX.Element {
     let data: EditorData
     if (kind === 'prompt') data = { kind, title: 'Prompt', text: '' }
     else if (kind === 'image') data = { kind, title: 'Image', image: null }
+    else if (kind === 'batch-generate') data = {
+      kind,
+      title: 'Batch Image Generate',
+      folder: null,
+      settings: { width: 768, height: 768, seed: Math.floor(Math.random() * 2147483647), steps: 4, cfg: 1 },
+      matchInputSize: true,
+      state: 'idle',
+      result: null,
+      outputDirectory: null,
+      total: 0,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      currentFile: null,
+      error: null,
+      durationMs: null,
+      startedAtMs: null
+    }
     else data = {
       kind,
       title: 'Image Generate',
@@ -1131,7 +1439,7 @@ function Editor(): React.JSX.Element {
   const openNodeContextMenu = useCallback((event: MouseEvent | React.MouseEvent<Element>) => {
     event.preventDefault()
     const menuWidth = 176
-    const menuHeight = 142
+    const menuHeight = 176
     setNodeContextMenu({
       left: Math.min(event.clientX, window.innerWidth - menuWidth - 8),
       top: Math.min(event.clientY, window.innerHeight - menuHeight - 8),
@@ -1147,8 +1455,8 @@ function Editor(): React.JSX.Element {
 
   const saveCurrentSession = useCallback(async () => {
     if (!activeSession || hydratedSessionId !== activeSession.id) return
-    await window.imageMixer.saveSession(activeSession.id, { nodes, edges })
-  }, [activeSession, edges, hydratedSessionId, nodes])
+    await window.imageMixer.saveSession(activeSession.id, { nodes, edges, viewport: getViewport() })
+  }, [activeSession, edges, getViewport, hydratedSessionId, nodes])
 
   const chooseLibrary = useCallback(async () => {
     try {
@@ -1171,6 +1479,9 @@ function Editor(): React.JSX.Element {
       setActiveSession(created.session)
       setNodes(defaultNodes())
       setEdges(defaultEdges())
+      viewportToRestore.current = null
+      setCanvasViewport(null)
+      setViewportRestoreRevision((current) => current + 1)
       setHydratedSessionId(created.session.id)
       setSidebarError(null)
     } catch (error) {
@@ -1188,6 +1499,9 @@ function Editor(): React.JSX.Element {
       setActiveSession(loaded.session)
       setNodes(hasSavedNodes ? normalizeLoadedNodes(loaded.snapshot.nodes as EditorNode[]) : defaultNodes())
       setEdges(hasSavedNodes ? loaded.snapshot.edges as EditorEdge[] : defaultEdges())
+      viewportToRestore.current = loaded.snapshot.viewport ?? null
+      setCanvasViewport(loaded.snapshot.viewport ?? null)
+      setViewportRestoreRevision((current) => current + 1)
       setHydratedSessionId(loaded.session.id)
       setSidebarError(null)
     } catch (error) {
@@ -1207,6 +1521,9 @@ function Editor(): React.JSX.Element {
       setActiveSession(duplicated.session)
       setNodes(hasSavedNodes ? normalizeLoadedNodes(duplicated.snapshot.nodes as EditorNode[]) : defaultNodes())
       setEdges(hasSavedNodes ? duplicated.snapshot.edges as EditorEdge[] : defaultEdges())
+      viewportToRestore.current = duplicated.snapshot.viewport ?? null
+      setCanvasViewport(duplicated.snapshot.viewport ?? null)
+      setViewportRestoreRevision((current) => current + 1)
       setHydratedSessionId(duplicated.session.id)
       setSidebarError(null)
     } catch (error) {
@@ -1277,6 +1594,10 @@ function Editor(): React.JSX.Element {
     comfyReady: comfy.phase === 'ready',
     hasImageInput,
     updateNode,
+    chooseBatchFolder,
+    runBatch,
+    cancelBatch,
+    revealBatchOutput,
     chooseImage,
     dropImage,
     generate,
@@ -1284,7 +1605,7 @@ function Editor(): React.JSX.Element {
     copyResult,
     saveResult,
     previewResult: setPreviewImage
-  }), [cancelGeneration, chooseImage, comfy.phase, copyResult, dropImage, generate, hasImageInput, saveResult, updateNode])
+  }), [cancelBatch, cancelGeneration, chooseBatchFolder, chooseImage, comfy.phase, copyResult, dropImage, generate, hasImageInput, revealBatchOutput, runBatch, saveResult, updateNode])
 
   const nodeTypes = useMemo(() => ({ editor: EditorNodeComponent }), [])
 
@@ -1427,6 +1748,7 @@ function Editor(): React.JSX.Element {
               isValidConnection={isValidConnection}
               onPaneContextMenu={openNodeContextMenu}
               onPaneClick={() => setNodeContextMenu(null)}
+              onMoveEnd={(_event, viewport) => setCanvasViewport(viewport)}
               panOnDrag={[1]}
               selectionOnDrag
               selectionMode={SelectionMode.Partial}
@@ -1452,11 +1774,13 @@ function Editor(): React.JSX.Element {
                 nodeColor={(node) => {
                   if (node.data.kind === 'prompt') return '#654398'
                   if (node.data.kind === 'image') return '#216f96'
+                  if (node.data.kind === 'batch-generate') return '#247a68'
                   return '#96552f'
                 }}
                 nodeStrokeColor={(node) => {
                   if (node.data.kind === 'prompt') return '#c39cff'
                   if (node.data.kind === 'image') return '#79d3ff'
+                  if (node.data.kind === 'batch-generate') return '#77e0c2'
                   return '#ffb17d'
                 }}
               />
@@ -1483,6 +1807,7 @@ function Editor(): React.JSX.Element {
             <button type='button' onClick={() => addNodeFromContextMenu('prompt')}><span className='node-type-dot prompt' />Prompt</button>
             <button type='button' onClick={() => addNodeFromContextMenu('image')}><span className='node-type-dot image' />Image</button>
             <button type='button' onClick={() => addNodeFromContextMenu('generate')}><span className='node-type-dot generate' />Image Generate</button>
+            <button type='button' onClick={() => addNodeFromContextMenu('batch-generate')}><span className='node-type-dot batch-generate' />Batch Image Generate</button>
           </div>
         )}
         {screenshotNotice && (

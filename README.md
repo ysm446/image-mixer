@@ -13,7 +13,7 @@ ComfyUIの内部ワークフローを直接編集するのではなく、素材�
 - 左ドラッグによる範囲選択と選択ノードの一括移動
 - 選択ノードと選択範囲内のエッジをまとめてコピー＆ペースト
 - `F`で選択ノードへフォーカス、`A`で全ノードを表示
-- Prompt、Image、Image Generateノード
+- Prompt、Image、Image Generate、Batch Image Generateノード
 - 長文に合わせて高さが自動で広がるPromptノード
 - 編集アイコンから変更できるノードタイトル
 - Promptだけを接続した画像生成と、生成ノード1つにつき最大3枚の参照画像を使う画像編集
@@ -164,6 +164,7 @@ Image 1と同じ出力サイズにする場合は、`Generate時にImage 1のサ
 | Prompt | ComfyUIへ送る編集指示を入力 | Prompt出力 |
 | Image | ローカル画像をセッションへ読み込む | IMAGE出力 |
 | Image Generate | 最大3枚の画像とPromptから画像を生成 | Prompt入力、IMAGE入力×3、IMAGE出力 |
+| Batch Image Generate | 選択フォルダ直下の画像をImage 1として1枚ずつ生成 | Prompt入力、IMAGE入力×2 |
 
 Image Generateノードでは次の値を指定できます。
 

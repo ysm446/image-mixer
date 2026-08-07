@@ -38,6 +38,44 @@ export interface GenerateRequest {
   imagePaths: Array<string | null>
   imageSourceNodeIds: Array<string | null>
   settings: GenerateSettings
+  transient?: boolean
+}
+
+export interface BatchFolderSelection {
+  path: string
+  name: string
+  imageCount: number
+}
+
+export interface BatchInputFile {
+  path: string
+  name: string
+  width: number
+  height: number
+}
+
+export interface BatchPreparation {
+  inputDirectory: string
+  outputDirectory: string
+  files: BatchInputFile[]
+}
+
+export interface BatchManifestItem {
+  inputPath: string
+  outputPath: string | null
+  seed: number
+  settings: GenerateSettings
+  error: string | null
+}
+
+export interface BatchManifest {
+  createdAt: string
+  inputDirectory: string
+  outputDirectory: string
+  prompt: string
+  settings: GenerateSettings
+  matchInputSize: boolean
+  items: BatchManifestItem[]
 }
 
 export interface GenerationStartedEvent {
@@ -67,9 +105,16 @@ export interface SessionRecord {
   updatedAt: string
 }
 
+export interface SessionViewport {
+  x: number
+  y: number
+  zoom: number
+}
+
 export interface SessionSnapshot {
   nodes: unknown[]
   edges: unknown[]
+  viewport?: SessionViewport
 }
 
 export interface LibraryBootstrap {

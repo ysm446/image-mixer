@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import type { ComfyStatus, GenerateRequest, GenerationStartedEvent, SessionSnapshot, SystemResources } from '../main/types'
+import type { BatchManifest, ComfyStatus, GenerateRequest, GenerationStartedEvent, SessionSnapshot, SystemResources } from '../main/types'
 import type { ImageMixerApi } from './bridge'
 
 const api: ImageMixerApi = {
@@ -15,6 +15,11 @@ const api: ImageMixerApi = {
   saveSession: (sessionId, snapshot: SessionSnapshot) => ipcRenderer.invoke('session:save', sessionId, snapshot),
   copySessionAssets: (sourceSessionId, targetSessionId, sourcePaths) => ipcRenderer.invoke('session:copy-assets', sourceSessionId, targetSessionId, sourcePaths),
   deleteSession: (sessionId) => ipcRenderer.invoke('session:delete', sessionId),
+  chooseBatchFolder: () => ipcRenderer.invoke('batch:choose-folder'),
+  prepareBatchFolder: (inputDirectory) => ipcRenderer.invoke('batch:prepare', inputDirectory),
+  saveBatchGeneratedImage: (sessionId, generated, inputPath, outputDirectory, index) => ipcRenderer.invoke('batch:save-image', sessionId, generated, inputPath, outputDirectory, index),
+  writeBatchManifest: (outputDirectory, manifest: BatchManifest) => ipcRenderer.invoke('batch:write-manifest', outputDirectory, manifest),
+  revealBatchOutput: (outputDirectory) => ipcRenderer.invoke('batch:reveal-output', outputDirectory),
   chooseImage: (sessionId) => ipcRenderer.invoke('image:choose', sessionId),
   importDroppedImage: (file, sessionId) => {
     const sourcePath = webUtils.getPathForFile(file)

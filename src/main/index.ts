@@ -6,7 +6,7 @@ import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import * as os from 'node:os'
 import sharp from 'sharp'
-import type { ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, LibraryBootstrap, LibraryInfo, SessionRecord, SessionSnapshot, SystemResources } from './types'
+import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, LibraryBootstrap, LibraryInfo, SessionRecord, SessionSnapshot, SystemResources } from './types'
 
 const COMFY_URL = 'http://127.0.0.1:8189'
 const COMFY_PORT = '8189'
@@ -258,7 +258,7 @@ async function renameSession(sessionId: string, name: string): Promise<SessionRe
 }
 
 function rebaseSnapshotAssets(snapshot: SessionSnapshot, sourceDirectory: string, targetDirectory: string): SessionSnapshot {
-  const clone = structuredClone(snapshot) as { nodes: Array<{ data?: { image?: ImageAsset | null; result?: GeneratedImage | null } }>; edges: unknown[] }
+  const clone = structuredClone(snapshot) as { nodes: Array<{ data?: { kind?: string; image?: ImageAsset | null; result?: GeneratedImage | null } }>; edges: unknown[] }
   const sourceRoot = resolve(sourceDirectory)
   const rebaseAsset = (asset: ImageAsset | GeneratedImage): void => {
     const sourcePath = resolve(asset.path)
@@ -268,7 +268,8 @@ function rebaseSnapshotAssets(snapshot: SessionSnapshot, sourceDirectory: string
   }
   for (const node of clone.nodes) {
     if (node.data?.image) rebaseAsset(node.data.image)
-    if (node.data?.result) rebaseAsset(node.data.result)
+    if (node.data?.result && node.data.kind !== 'batch-generate') rebaseAsset(node.data.result)
+    else if (node.data?.result) node.data.result.dataUrl = ''
   }
   return clone
 }
@@ -489,6 +490,81 @@ async function importImage(sourcePath: string, sessionId: string): Promise<Image
     await rm(destination, { force: true })
     throw error
   }
+}
+
+async function scanBatchDirectory(inputDirectory: string): Promise<BatchFolderSelection> {
+  const directory = resolve(inputDirectory)
+  const entries = await readdir(directory, { withFileTypes: true })
+  const imageCount = entries.filter((entry) => entry.isFile() && sessionAssetExtensions.has(extname(entry.name).toLowerCase())).length
+  return { path: directory, name: basename(directory), imageCount }
+}
+
+async function chooseBatchDirectory(): Promise<BatchFolderSelection | null> {
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] })
+    : await dialog.showOpenDialog({ properties: ['openDirectory'] })
+  if (result.canceled || !result.filePaths[0]) return null
+  return scanBatchDirectory(result.filePaths[0])
+}
+
+async function prepareBatchDirectory(inputDirectory: string): Promise<BatchPreparation> {
+  const selection = await scanBatchDirectory(inputDirectory)
+  if (selection.imageCount === 0) throw new Error('The selected folder does not contain supported images')
+  const entries = await readdir(selection.path, { withFileTypes: true })
+  const names = entries
+    .filter((entry) => entry.isFile() && sessionAssetExtensions.has(extname(entry.name).toLowerCase()))
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }))
+  const files: BatchPreparation['files'] = []
+  for (const name of names) {
+    const path = join(selection.path, name)
+    try {
+      const metadata = await sharp(path, { failOn: 'error' }).metadata()
+      files.push({ path, name, width: metadata.width ?? 0, height: metadata.height ?? 0 })
+    } catch {
+      files.push({ path, name, width: 0, height: 0 })
+    }
+  }
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('Z', '')
+  const outputDirectory = join(selection.path, 'image-mixer-output-' + timestamp)
+  await mkdir(outputDirectory, { recursive: false })
+  return { inputDirectory: selection.path, outputDirectory, files }
+}
+
+function validateBatchOutputDirectory(outputDirectory: string): string {
+  const target = resolve(outputDirectory)
+  if (!basename(target).startsWith('image-mixer-output-')) throw new Error('Invalid batch output folder')
+  return target
+}
+
+async function saveBatchGeneratedImage(sessionId: string, generated: GeneratedImage, inputPath: string, outputDirectory: string, index: number): Promise<GeneratedImage> {
+  const source = resolveSessionAssetPath(sessionId, generated.path)
+  const output = validateBatchOutputDirectory(outputDirectory)
+  const input = resolve(inputPath)
+  if (dirname(input) !== dirname(output)) throw new Error('Batch input image is outside the selected input folder')
+  if (!Number.isInteger(index) || index < 0) throw new Error('Invalid batch item index')
+  const extension = extname(source).toLowerCase() || '.png'
+  const inputStem = basename(input, extname(input))
+  const destination = join(output, String(index + 1).padStart(4, '0') + '-' + inputStem + extension)
+  try {
+    await copyFile(source, destination)
+    return { ...generated, path: destination, name: basename(destination) }
+  } finally {
+    pendingSessionAssets.delete(assetPathKey(source))
+    await rm(source, { force: true })
+  }
+}
+
+async function writeBatchManifest(outputDirectory: string, manifest: BatchManifest): Promise<void> {
+  const output = validateBatchOutputDirectory(outputDirectory)
+  if (resolve(manifest.outputDirectory) !== output) throw new Error('Batch manifest output folder does not match')
+  if (resolve(manifest.inputDirectory) !== dirname(output)) throw new Error('Batch manifest input folder does not match')
+  await writeFile(join(output, 'batch-result.json'), JSON.stringify(manifest, null, 2), 'utf8')
+}
+
+async function revealBatchOutput(outputDirectory: string): Promise<void> {
+  const error = await shell.openPath(validateBatchOutputDirectory(outputDirectory))
+  if (error) throw new Error(error)
 }
 
 async function copySessionAssets(sourceSessionId: string, targetSessionId: string, sourcePaths: string[]): Promise<CopiedSessionAsset[]> {
@@ -892,7 +968,7 @@ async function processGenerationQueue(): Promise<void> {
       mainWindow?.webContents.send('image:generation-started', startedEvent)
       try {
         const result = await runImageGeneration(job)
-        latestGenerationResultPaths.set(key, result.path)
+        if (!job.request.transient) latestGenerationResultPaths.set(key, result.path)
         job.resolve(result)
       } catch (error) {
         job.reject(error)
@@ -1000,6 +1076,11 @@ function registerIpc(): void {
     await rm(sessionDirectory(sessionId), { recursive: true, force: true })
     return buildLibraryBootstrap()
   })
+  ipcMain.handle('batch:choose-folder', () => chooseBatchDirectory())
+  ipcMain.handle('batch:prepare', (_event, inputDirectory: string) => prepareBatchDirectory(inputDirectory))
+  ipcMain.handle('batch:save-image', (_event, sessionId: string, generated: GeneratedImage, inputPath: string, outputDirectory: string, index: number) => saveBatchGeneratedImage(sessionId, generated, inputPath, outputDirectory, index))
+  ipcMain.handle('batch:write-manifest', (_event, outputDirectory: string, manifest: BatchManifest) => writeBatchManifest(outputDirectory, manifest))
+  ipcMain.handle('batch:reveal-output', (_event, outputDirectory: string) => revealBatchOutput(outputDirectory))
   ipcMain.handle('image:choose', async (_event, sessionId: string): Promise<ImageAsset | null> => {
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],

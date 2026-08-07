@@ -1,7 +1,7 @@
 # ComfyUI 連携仕様
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-07 02:43
+更新日時: 2026-08-07 05:52
 
 ## 対象
 
@@ -120,6 +120,7 @@ bindings:
 ## seed と再現性
 
 - UI の Random は API へ特別値として渡さず、キュー投入直前に有効範囲内の整数へ解決する。
+- Batch Image Generateは各入力ファイルをImage 1として既存FIFOキューへ順次投入する。生成直後の一時assetは専用出力フォルダへ保存した後に削除し、通常ノードの最新結果参照には登録しない。
 - 解決済み seed を execution snapshot と result metadata に保存する。
 - 再実行には保存済み seed を既定で使い、「新しい seed」は別操作にする。
 - 同じ seed でも ComfyUI、PyTorch、CUDA、model、workflow が変われば同一画像を保証できないため、それらの version/hash も記録する。
