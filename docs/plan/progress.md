@@ -1,11 +1,11 @@
 # 進捗
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-07 16:00
+更新日時: 2026-08-07 16:34
 
 ## 現在の状態
 
-Electron + React Flowの動作版を実装済みです。Prompt、Image、Image Generate、Batch Image Generateノードに加え、左サイドバーからルートフォルダと複数セッションを管理できます。各セッションのグラフ、入力画像、生成結果は個別のフォルダへ保存されます。
+Electron + React Flowの動作版を実装済みです。Text、Image、Image Generate、Batch Image Generateノードに加え、左サイドバーからルートフォルダと複数セッションを管理できます。各セッションのグラフ、入力画像、生成結果は個別のフォルダへ保存されます。
 
 - Batch Image Generateノードを追加した。選択フォルダ直下のPNG・JPEG・WebP・BMPを開始時に固定し、各画像をImage 1として既存FIFOキューで1枚ずつ処理する。日時付きの新規出力フォルダへ結果と`batch-result.json`を保存し、進捗表示、個別失敗の継続、キャンセル、出力フォルダ表示に対応した。
 
@@ -32,15 +32,19 @@ Electron + React Flowの動作版を実装済みです。Prompt、Image、Image 
 
 ## 完了済み
 
-- Text Transformノードを追加した。Prompt、Image Describe、Text Transformから任意でテキストを入力し、Instructionによる翻訳・修正・詳細化などの全文加工をストリーミング実行できる。
+- 画面上のPromptノードをTextへ改称し、既定タイトル、右クリックメニュー、入出力ラベルをTEXTへ統一した。既存セッション互換のため内部のkindとハンドルIDは維持し、旧既定タイトルだけを読込時に移行する。Text系ノードのテキストエリアはTextノードと同じ濃紺の配色へ統一した。
+- Batch Image GenerateをImage Generateと同じオレンジ系へ変更し、ノード枠、フォルダ欄、進捗、結果枠、ミニマップの配色を統一した。
+- 接続型の色を統一した。Text、Image Describe、Text TransformのText系ピンとエッジおよびノード配色を紫、Image系ピンとエッジを青にし、既存セッションのエッジも読込時に自動補正する。
+
+- Text Transformノードを追加した。Text、Image Describe、Text Transformから任意でテキストを入力し、Instructionによる翻訳・修正・詳細化などの全文加工をストリーミング実行できる。
 - Text入力なしでもInstructionだけから文章や画像編集プロンプトを新規生成できる。出力は手動編集とPrompt接続に対応し、折りたたみSystem Prompt、既定値表示、経過時間、キャンセル、エラー表示、保存復元にも対応した。
 
-- Image Describeノードを追加した。ImageまたはImage Generateの画像出力を受け、Describe操作でLocal LLMの説明を編集可能なテキストエリアへストリーミング表示し、Prompt出力として画像生成ノードへ接続できる。
+- Image Describeノードを追加した。ImageまたはImage Generateの画像出力を受け、Describe操作でLocal LLMの説明を編集可能なテキストエリアへストリーミング表示し、TEXT出力として画像生成ノードへ接続できる。
 - Image DescribeのSystem Promptを下段の折りたたみ領域へ追加した。初期状態は閉じ、未入力時は実際に使用する既定プロンプト全文をプレースホルダー表示して既定値として送信する。
 - Image Describeの実行時間、失敗、キャンセル、セッション保存、コピー時の実行状態修復に対応した。WebP・BMPを含む入力画像はLLM送信前に長辺1536px以内のPNGへ正規化する。
 
 - `lm-graph`を参考にLocal LLM基盤を追加した。`models/`のGGUFと同じフォルダにある`mmproj`を自動検出し、`runtime/llama-server/`の実行ファイルをElectron mainからLoad・Reload・Unloadできる。
-- 上部バーへLocal LLMモデル選択、状態、Load操作を追加し、右端の歯車からContext length、最大出力、Temperature、アイドルアンロード、GPU layers、Flash Attention、mmproj GPU offloadを設定できるようにした。
+- 上部バーのLocal LLMモデル選択をクリック式のバーへ変更し、ポップアップ一覧からモデルを選ぶとロードするようにした。ロード済みは明るい緑、アンロードは暗色、切替中はアニメーション、再ロード待ちは黄系で表示する。右端の歯車からContext length、最大出力、Temperature、アイドルアンロード、GPU layers、Flash Attention、mmproj GPU offloadを設定できる。
 - Local LLM設定を`data/app-settings.json`へ保存し、モデル・サーバー・ログの各フォルダ表示と再スキャンに対応した。GGUFとllama-server一式はGit管理対象外とした。
 
 - キャンバスの空白部分へ画像ファイルをドロップすると、ドロップ位置へImageノードを自動作成して画像を割り当てるようにした。既存Imageノード上へのドロップは従来どおり差し替えとして扱う。

@@ -1,7 +1,7 @@
 # 実装計画
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-07 16:00
+更新日時: 2026-08-07 16:34
 
 ## 基本方針
 
@@ -71,11 +71,12 @@ React Flow renderer
 ### Phase 2: グラフ編集と保存
 
 - 画像入力、画像生成、生成結果ノードを実装する。
-- Promptノードの本文入力欄は折り返し後の内容量に合わせて自動で縦へ伸ばし、内部スクロールを発生させない。
+- Textノードの本文入力欄は折り返し後の内容量に合わせて自動で縦へ伸ばし、内部スクロールを発生させない。
 - 各ノードのタイトルは通常時に表示専用とし、横の編集アイコンから入力欄へ切り替えて変更する。
 - 型付きハンドル、最大入力数、自己接続・サイクル防止を実装する。
-- キャンバスの右クリック位置へPrompt / Image / Image Generateノードを追加できるコンテキストメニューを実装する。
-- ノード追加操作はキャンバスの右クリックメニューへ一本化する。上部バーにはLocal LLMのモデル選択・Load操作、ComfyUI状態、Local LLM設定ボタンを置き、アプリ名や説明文、新規作成ボタンは置かない。
+- Text系のピンとエッジは紫、Image系は青で統一し、接続型を色から判別できるようにする。Text、Image Describe、Text Transformのノード配色は紫系、Image GenerateとBatch Image Generateはオレンジ系に揃える。
+- キャンバスの右クリック位置へText / Image / Image Generateノードを追加できるコンテキストメニューを実装する。
+- ノード追加操作はキャンバスの右クリックメニューへ一本化する。上部バーにはLocal LLMのモデル選択ボタン、Load／Unload操作、ComfyUI状態、Local LLM設定ボタンを置き、アプリ名や説明文、新規作成ボタンは置かない。モデル選択はポップアップ一覧で行い、ロード済み・アンロード・切替中・再ロード待ちをバーの明るさと配色で判別できるようにする。
 - 左ドラッグの部分一致範囲選択、複数ノード移動、`F` / `A`のfit viewショートカットを実装する。
 - セッションごとのキャンバス位置とズームをsnapshotへ保存し、切り替え・再起動時に復元する。
 - `Ctrl+C` / `Ctrl+V`で選択ノードと選択集合内のエッジを新しいIDへ複製する。別セッションへ貼り付ける場合は、参照画像と生成結果を貼り付け先セッションの`assets/`へ独立コピーしてパスを付け替える。
@@ -90,8 +91,8 @@ React Flow renderer
 - Image Generateノードの結果画像をクリックすると画面内へ拡大し、背景クリックまたはEscapeで閉じるプレビューを提供する。
 - Image GenerateノードのSeed欄へランダム化ボタンを設け、有効範囲内の値を即時設定する。
 - Image Generateノードのinput / outputピン文言はノード内へ重ねず、対応するピンの外側へ配置する。
-- Image DescribeノードはImage入力をLocal LLMへ送り、編集可能な説明テキストへストリーミング出力する。出力はPrompt型としてImage GenerateとBatch Image Generateへ接続できる。下段のSystem Promptは初期状態で閉じ、空欄時は表示される既定プロンプトを使用する。
-- Text TransformノードはPrompt、Image Describe、Text Transformの出力を任意入力として受け、Instructionに従って全文を加工する。入力がなければInstructionだけから新規生成し、結果を編集可能なPrompt型テキストとしてストリーミング出力する。System Promptは折りたたみ式とし、空欄時は表示される既定値を使用する。
+- Image DescribeノードはImage入力をLocal LLMへ送り、編集可能な説明テキストへストリーミング出力する。出力はTEXT型としてImage GenerateとBatch Image Generateへ接続できる。下段のSystem Promptは初期状態で閉じ、空欄時は表示される既定プロンプトを使用する。
+- Text TransformノードはText、Image Describe、Text Transformの出力を任意入力として受け、Instructionに従って全文を加工する。入力がなければInstructionだけから新規生成し、結果を編集可能なTEXT型テキストとしてストリーミング出力する。System Promptは折りたたみ式とし、空欄時は表示される既定値を使用する。
 
 完了条件: 再起動後もセッションのグラフと入力画像を復元できる。2026-08-05時点でJSON snapshotとセッションassetによる永続化を実装済み。
 

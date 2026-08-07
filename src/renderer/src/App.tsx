@@ -260,7 +260,7 @@ function EditableNodeTitle({ title, ariaLabel, onCommit }: EditableNodeTitleProp
   )
 }
 
-function PromptNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Element {
+function TextNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Element {
   const { updateNode } = useEditor()
   const prompt = data as PromptData
   const [draftText, setDraftText] = useState(prompt.text)
@@ -280,9 +280,9 @@ function PromptNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.El
   }, [draftText])
 
   return (
-    <article className={`node-card prompt-node ${selected ? 'selected' : ''}`}>
-      <div className='node-kicker'>PROMPT</div>
-      <EditableNodeTitle title={prompt.title} ariaLabel='Prompt node title' onCommit={(title) => updateNode(id, { title })} />
+    <article className={`node-card prompt-node text-node ${selected ? 'selected' : ''}`}>
+      <div className='node-kicker'>TEXT</div>
+      <EditableNodeTitle title={prompt.title} ariaLabel='Text node title' onCommit={(title) => updateNode(id, { title })} />
       <textarea
         ref={textAreaRef}
         className='prompt-editor nodrag nopan nowheel'
@@ -299,10 +299,10 @@ function PromptNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.El
         }}
         onKeyDown={(event) => event.stopPropagation()}
         onKeyUp={(event) => event.stopPropagation()}
-        placeholder='Describe how the connected images should be combined or edited…'
+        placeholder='テキストを入力…'
       />
-      <p className='node-hint'>ローカルLLMによる補助は次のフェーズで追加予定</p>
-      <Handle type='source' position={Position.Right} id='prompt' className='handle prompt-handle' />
+      <Handle type='source' position={Position.Right} id='prompt' className='handle prompt-handle output-handle' />
+      <div className='output-label'>TEXT</div>
     </article>
   )
 }
@@ -472,7 +472,7 @@ function ImageDescribeNode({ id, data, selected }: NodeProps<EditorNode>): React
         <button type='button' className='describe-button nodrag' disabled={!llmVisionReady || !hasImage} title={!llmVisionReady ? 'Vision対応のLocal LLMをロードしてください' : !hasImage ? '画像を接続してください' : '画像を説明する'} onClick={() => void describeImage(id)}>Describe</button>
       )}
       <Handle type='source' position={Position.Right} id='prompt' className='handle prompt-handle output-handle' />
-      <div className='output-label'>PROMPT</div>
+      <div className='output-label'>TEXT</div>
     </article>
   )
 }
@@ -515,7 +515,7 @@ function TextTransformNode({ id, data, selected }: NodeProps<EditorNode>): React
     <article className={`node-card text-transform-node ${selected ? 'selected' : ''}`}>
       <div className='node-kicker'>TEXT TRANSFORM</div>
       <EditableNodeTitle title={transformData.title} ariaLabel='Text Transform node title' onCommit={(title) => updateNode(id, { title })} />
-      <div className='transform-input-label'>Text <small>optional</small></div>
+      <div className='transform-input-label'>TEXT <small>optional</small></div>
       <Handle type='target' position={Position.Left} id='text' className='handle prompt-handle transform-text-handle' />
 
       <label className='transform-field-label'>Instruction</label>
@@ -856,7 +856,7 @@ function BatchGenerateNode({ id, data, selected }: NodeProps<EditorNode>): React
 }
 
 function EditorNodeComponent(props: NodeProps<EditorNode>): React.JSX.Element {
-  if (props.data.kind === 'prompt') return <PromptNode {...props} />
+  if (props.data.kind === 'prompt') return <TextNode {...props} />
   if (props.data.kind === 'image') return <ImageNode {...props} />
   if (props.data.kind === 'image-describe') return <ImageDescribeNode {...props} />
   if (props.data.kind === 'text-transform') return <TextTransformNode {...props} />
@@ -869,7 +869,7 @@ const initialNodes: EditorNode[] = [
     id: 'prompt-1',
     type: 'editor',
     position: { x: 70, y: 80 },
-    data: { kind: 'prompt', title: 'Edit prompt', text: '' }
+    data: { kind: 'prompt', title: 'Text', text: '' }
   },
   {
     id: 'image-1',
@@ -895,28 +895,49 @@ const initialNodes: EditorNode[] = [
   }
 ]
 
+const PROMPT_EDGE_COLOR = '#a878ff'
+const IMAGE_EDGE_COLOR = '#45b8ff'
+
+function connectionColor(targetHandle: string | null | undefined): string {
+  return targetHandle?.startsWith('image') ? IMAGE_EDGE_COLOR : PROMPT_EDGE_COLOR
+}
+
+function normalizeEditorEdge(edge: EditorEdge): EditorEdge {
+  const color = connectionColor(edge.targetHandle)
+  return {
+    ...edge,
+    style: { ...edge.style, stroke: color },
+    markerEnd: { type: MarkerType.ArrowClosed, color }
+  }
+}
+
+function normalizeLoadedEdges(edges: EditorEdge[]): EditorEdge[] {
+  return edges.map((edge) => normalizeEditorEdge(edge))
+}
+
 const initialEdges: EditorEdge[] = [
-  {
+  normalizeEditorEdge({
     id: 'prompt-1-generate-1-prompt',
     source: 'prompt-1',
     sourceHandle: 'prompt',
     target: 'generate-1',
     targetHandle: 'prompt',
-    animated: true,
-    markerEnd: { type: MarkerType.ArrowClosed }
-  },
-  {
+    animated: true
+  }),
+  normalizeEditorEdge({
     id: 'image-1-generate-1-image1',
     source: 'image-1',
     sourceHandle: 'image',
     target: 'generate-1',
-    targetHandle: 'image1',
-    markerEnd: { type: MarkerType.ArrowClosed }
-  }
+    targetHandle: 'image1'
+  })
 ]
 
 function normalizeLoadedNodes(nodes: EditorNode[]): EditorNode[] {
   return nodes.map((node) => {
+    if (node.data.kind === 'prompt' && (node.data.title === 'Edit prompt' || node.data.title === 'Prompt')) {
+      return { ...node, data: { ...node.data, title: 'Text' } }
+    }
     if (node.data.kind === 'image-describe' && (node.data.state === 'queued' || node.data.state === 'running')) {
       return { ...node, data: { ...node.data, state: 'canceled', error: null, startedAtMs: null } }
     }
@@ -978,6 +999,8 @@ function Editor(): React.JSX.Element {
   const [comfyTogglePending, setComfyTogglePending] = useState(false)
   const [llm, setLlm] = useState<LlmStatus>(EMPTY_LLM_STATUS)
   const [llmTogglePending, setLlmTogglePending] = useState(false)
+  const [llmModelPickerOpen, setLlmModelPickerOpen] = useState(false)
+  const [llmModelPickerError, setLlmModelPickerError] = useState<string | null>(null)
   const [llmSettingsOpen, setLlmSettingsOpen] = useState(false)
   const [llmSettingsDraft, setLlmSettingsDraft] = useState<LlmConfig>(EMPTY_LLM_STATUS.config)
   const [llmSettingsError, setLlmSettingsError] = useState<string | null>(null)
@@ -1072,6 +1095,15 @@ function Editor(): React.JSX.Element {
     })
   }, [llmSettingsOpen])
 
+  useEffect(() => {
+    if (!llmModelPickerOpen) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setLlmModelPickerOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [llmModelPickerOpen])
+
   const toggleComfyUI = useCallback(async (): Promise<void> => {
     if (comfyTogglePending || comfy.phase === 'starting' || comfy.phase === 'stopping') return
     setComfyTogglePending(true)
@@ -1087,14 +1119,36 @@ function Editor(): React.JSX.Element {
     }
   }, [comfy.phase, comfyTogglePending])
 
-  const selectLlmModel = useCallback(async (selectedModelPath: string): Promise<void> => {
+  const openLlmModelPicker = useCallback(async (): Promise<void> => {
+    setLlmModelPickerError(null)
+    setLlmModelPickerOpen(true)
     try {
-      setLlmSettingsError(null)
-      setLlm(await window.imageMixer.updateLlmConfig({ selectedModelPath }))
+      const status = await window.imageMixer.rescanLlm()
+      setLlm(status)
+      setLlmSettingsDraft(status.config)
     } catch (error) {
-      setLlmSettingsError(error instanceof Error ? error.message : String(error))
+      setLlmModelPickerError(error instanceof Error ? error.message : String(error))
     }
   }, [])
+
+  const selectLlmModel = useCallback(async (selectedModelPath: string): Promise<void> => {
+    if (llmTogglePending || llm.phase === 'loading' || llm.phase === 'unloading') return
+    setLlmModelPickerOpen(false)
+    setLlmModelPickerError(null)
+    if (llm.phase === 'ready' && !llm.restartRequired && llm.loadedModelPath === selectedModelPath) return
+    setLlmTogglePending(true)
+    try {
+      let status = await window.imageMixer.updateLlmConfig({ selectedModelPath })
+      setLlm(status)
+      setLlmSettingsDraft(status.config)
+      status = await window.imageMixer.loadLlm()
+      setLlm(status)
+    } catch (error) {
+      setLlm((current) => ({ ...current, phase: 'error', message: error instanceof Error ? error.message : String(error) }))
+    } finally {
+      setLlmTogglePending(false)
+    }
+  }, [llm.loadedModelPath, llm.phase, llm.restartRequired, llmTogglePending])
 
   const toggleLlm = useCallback(async (): Promise<void> => {
     if (llmTogglePending || llm.phase === 'loading' || llm.phase === 'unloading') return
@@ -1110,6 +1164,7 @@ function Editor(): React.JSX.Element {
   }, [llm.phase, llm.restartRequired, llmTogglePending])
 
   const openLlmSettings = useCallback((): void => {
+    setLlmModelPickerOpen(false)
     setLlmSettingsDraft(llm.config)
     setLlmSettingsError(null)
     setLlmSettingsOpen(true)
@@ -1277,7 +1332,7 @@ function Editor(): React.JSX.Element {
     setSessions(bootstrap.sessions)
     setActiveSession(bootstrap.activeSession)
     setNodes(hasSavedNodes ? normalizeLoadedNodes(bootstrap.snapshot.nodes as EditorNode[]) : defaultNodes())
-    setEdges(hasSavedNodes ? bootstrap.snapshot.edges as EditorEdge[] : defaultEdges())
+    setEdges(hasSavedNodes ? normalizeLoadedEdges(bootstrap.snapshot.edges as EditorEdge[]) : defaultEdges())
     viewportToRestore.current = bootstrap.snapshot.viewport ?? null
     setCanvasViewport(bootstrap.snapshot.viewport ?? null)
     setViewportRestoreRevision((current) => current + 1)
@@ -1499,7 +1554,7 @@ function Editor(): React.JSX.Element {
     }
 
     if (!prompt) {
-      updateNode(nodeId, { state: 'failed', error: 'Prompt、Image Describe、またはText Transformノードを接続し、テキストを入力してください。', durationMs: null })
+      updateNode(nodeId, { state: 'failed', error: 'Text、Image Describe、またはText Transformノードを接続し、テキストを入力してください。', durationMs: null })
       return
     }
     if (hasEmptyImageConnection) {
@@ -1565,7 +1620,7 @@ function Editor(): React.JSX.Element {
     const promptNode = nodes.find((node) => node.id === promptEdge?.source)
     const prompt = promptTextFromNode(promptNode)
     if (!prompt) {
-      updateNode(nodeId, { state: 'failed', error: 'Prompt、Image Describe、またはText Transformノードを接続し、テキストを入力してください。' })
+      updateNode(nodeId, { state: 'failed', error: 'Text、Image Describe、またはText Transformノードを接続し、テキストを入力してください。' })
       return
     }
 
@@ -1859,13 +1914,13 @@ function Editor(): React.JSX.Element {
           if (occupiedExistingTargetPins.has(targetPinKey)) return []
           occupiedExistingTargetPins.add(targetPinKey)
         }
-        return [{
+        return [normalizeEditorEdge({
           ...structuredClone(edge),
           id: crypto.randomUUID(),
           source,
           target,
           selected: false
-        }]
+        })]
       })
       setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...pastedNodes])
       setEdges((current) => [...current.map((edge) => ({ ...edge, selected: false })), ...pastedEdges])
@@ -1928,12 +1983,11 @@ function Editor(): React.JSX.Element {
     if (!isValidConnection(connection)) return
     setEdges((current) => {
       const withoutExisting = current.filter((edge) => !(edge.target === connection.target && edge.targetHandle === connection.targetHandle))
-      return addEdge({
+      return addEdge(normalizeEditorEdge({
         ...connection,
         id: crypto.randomUUID(),
-        animated: connection.targetHandle === 'prompt',
-        markerEnd: { type: MarkerType.ArrowClosed }
-      }, withoutExisting)
+        animated: connection.targetHandle === 'prompt' || connection.targetHandle === 'text'
+      } as EditorEdge), withoutExisting)
     })
   }, [isValidConnection, setEdges])
 
@@ -1966,7 +2020,7 @@ function Editor(): React.JSX.Element {
     const id = `${kind}-${crypto.randomUUID()}`
     const position = requestedPosition ?? { x: 220 + Math.random() * 380, y: 120 + Math.random() * 360 }
     let data: EditorData
-    if (kind === 'prompt') data = { kind, title: 'Prompt', text: '' }
+    if (kind === 'prompt') data = { kind, title: 'Text', text: '' }
     else if (kind === 'image') data = { kind, title: 'Image', image: null }
     else if (kind === 'image-describe') data = {
       kind,
@@ -2085,7 +2139,7 @@ function Editor(): React.JSX.Element {
       setHydratedSessionId(null)
       setActiveSession(loaded.session)
       setNodes(hasSavedNodes ? normalizeLoadedNodes(loaded.snapshot.nodes as EditorNode[]) : defaultNodes())
-      setEdges(hasSavedNodes ? loaded.snapshot.edges as EditorEdge[] : defaultEdges())
+      setEdges(hasSavedNodes ? normalizeLoadedEdges(loaded.snapshot.edges as EditorEdge[]) : defaultEdges())
       viewportToRestore.current = loaded.snapshot.viewport ?? null
       setCanvasViewport(loaded.snapshot.viewport ?? null)
       setViewportRestoreRevision((current) => current + 1)
@@ -2107,7 +2161,7 @@ function Editor(): React.JSX.Element {
       setSessions(duplicated.sessions)
       setActiveSession(duplicated.session)
       setNodes(hasSavedNodes ? normalizeLoadedNodes(duplicated.snapshot.nodes as EditorNode[]) : defaultNodes())
-      setEdges(hasSavedNodes ? duplicated.snapshot.edges as EditorEdge[] : defaultEdges())
+      setEdges(hasSavedNodes ? normalizeLoadedEdges(duplicated.snapshot.edges as EditorEdge[]) : defaultEdges())
       viewportToRestore.current = duplicated.snapshot.viewport ?? null
       setCanvasViewport(duplicated.snapshot.viewport ?? null)
       setViewportRestoreRevision((current) => current + 1)
@@ -2202,38 +2256,43 @@ function Editor(): React.JSX.Element {
   }), [cancelBatch, cancelGeneration, cancelImageDescription, cancelTextTransform, chooseBatchFolder, chooseImage, comfy.phase, copyResult, describeImage, dropImage, generate, hasDescribeImageInput, hasImageInput, llm.loadedModelPath, llm.models, llm.phase, llm.restartRequired, revealBatchOutput, runBatch, saveResult, transformText, updateNode])
 
   const nodeTypes = useMemo(() => ({ editor: EditorNodeComponent }), [])
+  const selectedLlmModel = llm.models.find((model) => model.path === llm.config.selectedModelPath) ?? null
+  const loadedLlmModel = llm.models.find((model) => model.path === llm.loadedModelPath) ?? null
+  const llmBusy = llmTogglePending || llm.phase === 'loading' || llm.phase === 'unloading'
+  const llmLoaded = llm.phase === 'ready' && !llm.restartRequired && loadedLlmModel != null
+  const llmBarState = llmBusy ? 'busy' : llm.phase === 'error' ? 'error' : llm.restartRequired ? 'restart' : llmLoaded ? 'loaded' : 'unloaded'
 
   return (
     <EditorContext.Provider value={actions}>
       <main className='app-shell'>
         <header className='topbar'>
           <div className='llm-model-control'>
-            <span className={`llm-status-dot status-${llm.phase}`} aria-hidden='true' />
-            <label htmlFor='llm-model-select'>Local LLM</label>
-            <select
-              id='llm-model-select'
-              value={llm.config.selectedModelPath}
-              disabled={llm.phase === 'loading' || llm.phase === 'unloading' || llm.models.length === 0}
+            <button
+              type='button'
+              className={`llm-model-trigger state-${llmBarState}`}
               title={llm.message}
-              onChange={(event) => void selectLlmModel(event.target.value)}
+              aria-haspopup='dialog'
+              aria-expanded={llmModelPickerOpen}
+              disabled={llmBusy}
+              onClick={() => void openLlmModelPicker()}
             >
-              {llm.models.length === 0 && <option value=''>GGUFモデルがありません</option>}
-              {llm.models.map((model) => (
-                <option key={model.path} value={model.path}>
-                  {model.name} ({formatModelSize(model.sizeBytes)}){model.mmprojPath ? ' · Vision' : ''}
-                </option>
-              ))}
-            </select>
+              <svg className='llm-model-icon' viewBox='0 0 24 24' aria-hidden='true'><path d='M9 3v2M15 3v2M9 19v2M15 19v2M3 9h2M3 15h2M19 9h2M19 15h2' /><rect x='5' y='5' width='14' height='14' rx='3' /><rect x='9' y='9' width='6' height='6' rx='1.5' /></svg>
+              <span className='llm-model-trigger-copy'>
+                <small>LOCAL LLM</small>
+                <strong>{llmBusy ? (llm.phase === 'unloading' ? 'Unloading…' : 'Loading…') : selectedLlmModel?.name ?? 'Select a model'}</strong>
+              </span>
+              <span className='llm-model-trigger-state'>{llmBarState === 'loaded' ? 'Loaded' : llmBarState === 'restart' ? 'Reload' : llmBarState === 'busy' ? '' : 'Unloaded'}</span>
+              <svg className={`llm-model-chevron ${llmBusy ? 'spinning' : ''}`} viewBox='0 0 24 24' aria-hidden='true'>{llmBusy ? <path d='M20 12a8 8 0 1 1-2.34-5.66' /> : <path d='m7 10 5 5 5-5' />}</svg>
+            </button>
             <button
               type='button'
               className={`llm-toggle status-${llm.phase}`}
-              disabled={llmTogglePending || llm.phase === 'loading' || llm.phase === 'unloading' || !llm.serverPath || !llm.config.selectedModelPath}
+              disabled={llmBusy || !llm.serverPath || !llm.config.selectedModelPath}
               title={llm.message}
               onClick={() => void toggleLlm()}
             >
               {llm.phase === 'loading' ? 'Loading…' : llm.phase === 'unloading' ? 'Unloading…' : llm.phase === 'ready' && !llm.restartRequired ? 'Unload' : llm.restartRequired ? 'Reload' : 'Load'}
             </button>
-            <small className='llm-model-message' title={llm.message}>{llm.message}</small>
           </div>
           <button
             type='button'
@@ -2401,17 +2460,17 @@ function Editor(): React.JSX.Element {
                 nodeColor={(node) => {
                   if (node.data.kind === 'prompt') return '#654398'
                   if (node.data.kind === 'image') return '#216f96'
-                  if (node.data.kind === 'image-describe') return '#315f68'
-                  if (node.data.kind === 'text-transform') return '#5e4d2c'
-                  if (node.data.kind === 'batch-generate') return '#247a68'
+                  if (node.data.kind === 'image-describe') return '#654398'
+                  if (node.data.kind === 'text-transform') return '#654398'
+                  if (node.data.kind === 'batch-generate') return '#96552f'
                   return '#96552f'
                 }}
                 nodeStrokeColor={(node) => {
                   if (node.data.kind === 'prompt') return '#c39cff'
                   if (node.data.kind === 'image') return '#79d3ff'
-                  if (node.data.kind === 'image-describe') return '#76d3d8'
-                  if (node.data.kind === 'text-transform') return '#e0c170'
-                  if (node.data.kind === 'batch-generate') return '#77e0c2'
+                  if (node.data.kind === 'image-describe') return '#c39cff'
+                  if (node.data.kind === 'text-transform') return '#c39cff'
+                  if (node.data.kind === 'batch-generate') return '#ffb17d'
                   return '#ffb17d'
                 }}
               />
@@ -2435,7 +2494,7 @@ function Editor(): React.JSX.Element {
             onContextMenu={(event) => event.preventDefault()}
           >
             <div className='node-context-title'>ADD NODE</div>
-            <button type='button' onClick={() => addNodeFromContextMenu('prompt')}><span className='node-type-dot prompt' />Prompt</button>
+            <button type='button' onClick={() => addNodeFromContextMenu('prompt')}><span className='node-type-dot prompt' />Text</button>
             <button type='button' onClick={() => addNodeFromContextMenu('image')}><span className='node-type-dot image' />Image</button>
             <button type='button' onClick={() => addNodeFromContextMenu('image-describe')}><span className='node-type-dot image-describe' />Image Describe</button>
             <button type='button' onClick={() => addNodeFromContextMenu('text-transform')}><span className='node-type-dot text-transform' />Text Transform</button>
@@ -2454,6 +2513,32 @@ function Editor(): React.JSX.Element {
               </span>
             </button>
             <button type='button' className='screenshot-toast-close' aria-label='通知を閉じる' onClick={() => setScreenshotNotice(null)}>×</button>
+          </div>
+        )}
+        {llmModelPickerOpen && (
+          <div className='llm-model-picker-backdrop' onPointerDown={() => setLlmModelPickerOpen(false)}>
+            <section className='llm-model-picker' role='dialog' aria-modal='true' aria-labelledby='llm-model-picker-title' onPointerDown={(event) => event.stopPropagation()}>
+              <header>
+                <div><span>LOCAL LLM</span><h2 id='llm-model-picker-title'>モデルを選択</h2><p>選択したモデルをロードします</p></div>
+                <button type='button' className='llm-dialog-close' aria-label='閉じる' onClick={() => setLlmModelPickerOpen(false)}>×</button>
+              </header>
+              <div className='llm-model-picker-list'>
+                {llm.models.map((model) => {
+                  const loaded = llmLoaded && model.path === llm.loadedModelPath
+                  const selected = model.path === llm.config.selectedModelPath
+                  return (
+                    <button key={model.path} type='button' className={`llm-model-option ${loaded ? 'loaded' : selected ? 'selected' : ''}`} onClick={() => void selectLlmModel(model.path)}>
+                      <span className='llm-model-option-indicator' />
+                      <span className='llm-model-option-copy'><strong>{model.name}</strong><small title={model.path}>{model.path}</small></span>
+                      <span className='llm-model-option-meta'>{model.mmprojPath && <em>Vision</em>}<b>{formatModelSize(model.sizeBytes)}</b>{loaded && <i>Loaded</i>}</span>
+                    </button>
+                  )
+                })}
+                {llm.models.length === 0 && <div className='llm-model-picker-empty'><strong>GGUFモデルがありません</strong><span>models/フォルダへモデルを追加し、設定画面から再スキャンしてください。</span></div>}
+              </div>
+              {llmModelPickerError && <div className='llm-settings-error'>{llmModelPickerError}</div>}
+              <footer><span>{llm.message}</span><button type='button' onClick={openLlmSettings}>詳細設定</button></footer>
+            </section>
           </div>
         )}
         {llmSettingsOpen && (
