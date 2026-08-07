@@ -48,6 +48,10 @@ button { color: inherit; }
 .status-error > .comfy-status-dot { background: #ff6b6b; }
 .llm-settings-button { display: grid; width: 30px; height: 30px; flex: none; place-items: center; border: 1px solid #2f4356; border-radius: 9px; padding: 0; background: #12202e; color: #91a0b3; cursor: pointer; }
 .llm-settings-button:hover { border-color: #5c8ab4; background: #182a3b; color: #dbe7f3; }
+.sidebar-toggle-button { display: grid; width: 30px; height: 30px; flex: none; place-items: center; border: 1px solid #2f4356; border-radius: 9px; padding: 0; background: #12202e; color: #91a0b3; cursor: pointer; }
+.sidebar-toggle-button:hover { border-color: #5c8ab4; background: #182a3b; color: #dbe7f3; }
+.sidebar-toggle-button[aria-pressed='true'] { color: #7fc4f2; }
+.sidebar-toggle-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .llm-settings-button svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 @media (max-width: 1400px) { .llm-model-trigger { max-width: min(360px, 31vw); } }
 .left-sidebar { display: flex; min-height: 0; flex-direction: column; border-right: 1px solid #252c37; background: #0f141c; }

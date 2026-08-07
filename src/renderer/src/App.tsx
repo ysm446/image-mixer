@@ -32,6 +32,7 @@ const DEFAULT_SIDEBAR_WIDTH = 270
 const MIN_SIDEBAR_WIDTH = 220
 const MAX_SIDEBAR_WIDTH = 520
 const SIDEBAR_WIDTH_STORAGE_KEY = 'image-mixer.sidebar-width'
+const SIDEBAR_VISIBLE_STORAGE_KEY = 'image-mixer.sidebar-visible'
 const MINIMAP_STORAGE_KEY = 'image-mixer.show-minimap'
 
 const EMPTY_LLM_STATUS: LlmStatus = {
@@ -1033,6 +1034,7 @@ function Editor(): React.JSX.Element {
     return Number.isFinite(storedWidth) && storedWidth > 0 ? clampSidebarWidth(storedWidth) : DEFAULT_SIDEBAR_WIDTH
   })
   const [sidebarResizing, setSidebarResizing] = useState(false)
+  const [sidebarVisible, setSidebarVisible] = useState(() => window.localStorage.getItem(SIDEBAR_VISIBLE_STORAGE_KEY) !== '0')
   const [nodeContextMenu, setNodeContextMenu] = useState<{
     left: number
     top: number
@@ -1081,6 +1083,14 @@ function Editor(): React.JSX.Element {
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
     event.currentTarget.setPointerCapture(event.pointerId)
+  }, [])
+
+  const toggleSidebar = useCallback((): void => {
+    setSidebarVisible((current) => {
+      const next = !current
+      window.localStorage.setItem(SIDEBAR_VISIBLE_STORAGE_KEY, next ? '1' : '0')
+      return next
+    })
   }, [])
 
   const resetSidebarWidth = useCallback((): void => {
@@ -2343,6 +2353,16 @@ function Editor(): React.JSX.Element {
     <EditorContext.Provider value={actions}>
       <main className='app-shell'>
         <header className='topbar'>
+          <button
+            type='button'
+            className='sidebar-toggle-button'
+            title={sidebarVisible ? 'サイドバーを隠す' : 'サイドバーを表示'}
+            aria-label={sidebarVisible ? 'サイドバーを隠す' : 'サイドバーを表示'}
+            aria-pressed={sidebarVisible}
+            onClick={toggleSidebar}
+          >
+            <svg viewBox='0 0 24 24' aria-hidden='true'><rect x='3' y='4' width='18' height='16' rx='2' /><path d='M9.5 4v16' /></svg>
+          </button>
           <div className='llm-model-control'>
             <button
               type='button'
@@ -2390,8 +2410,8 @@ function Editor(): React.JSX.Element {
             <svg viewBox='0 0 24 24' aria-hidden='true'><path d='M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z' /><path d='M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3.01V3h4v.08a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z' /></svg>
           </button>
         </header>
-        <div className='workspace' style={{ gridTemplateColumns: sidebarWidth + 'px 0 minmax(0, 1fr)' }}>
-          <aside className='left-sidebar'>
+        <div className='workspace' style={{ gridTemplateColumns: sidebarVisible ? sidebarWidth + 'px 0 minmax(0, 1fr)' : 'minmax(0, 1fr)' }}>
+          {sidebarVisible && <aside className='left-sidebar'>
             <section className='library-section' onPointerDown={(event) => event.stopPropagation()}>
               <div className='sidebar-label'>ROOT FOLDER</div>
               <button type='button' className='library-button' onClick={() => void toggleLibraryMenu()} title={library?.rootPath} aria-haspopup='menu' aria-expanded={libraryMenu != null}>
@@ -2495,9 +2515,9 @@ function Editor(): React.JSX.Element {
             </section>
             {sidebarError && <div className='sidebar-error'>{sidebarError}</div>}
             <div className='sidebar-footer'>変更内容は現在のセッションへ自動保存されます</div>
-          </aside>
+          </aside>}
 
-          <div
+          {sidebarVisible && <div
             className={sidebarResizing ? 'sidebar-resizer resizing' : 'sidebar-resizer'}
             role='separator'
             aria-label='左サイドバーの幅を変更'
@@ -2511,7 +2531,7 @@ function Editor(): React.JSX.Element {
             onPointerUp={finishSidebarResize}
             onLostPointerCapture={finishSidebarResize}
             onDoubleClick={resetSidebarWidth}
-          />
+          />}
 
           <section ref={canvasRef} className='canvas-wrap'>
             <ReactFlow
