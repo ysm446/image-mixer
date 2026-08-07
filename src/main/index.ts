@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, shell } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
-import { copyFile, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, copyFile, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import * as os from 'node:os'
@@ -684,6 +684,8 @@ async function waitForComfy(timeoutMs = 90_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (await isComfyReady()) return true
+    // The exit handler already reported the failure when the managed process died.
+    if (!comfyProcess) return false
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
   return false
@@ -700,7 +702,7 @@ async function startComfyUI(): Promise<void> {
   if (comfyProcess) {
     setComfyStatus({ phase: 'starting', message: 'Waiting for ComfyUI…', managed: true })
     if (await waitForComfy()) setComfyStatus({ phase: 'ready', message: 'ComfyUI is ready', managed: true })
-    else setComfyStatus({ phase: 'error', message: 'Timed out while starting ComfyUI. Check data/logs/comfyui.log.', managed: true })
+    else if (comfyProcess) setComfyStatus({ phase: 'error', message: 'Timed out while starting ComfyUI. Check data/logs/comfyui.log.', managed: true })
     return
   }
 
@@ -710,8 +712,8 @@ async function startComfyUI(): Promise<void> {
   const comfyCwd = dirname(comfyMain)
 
   try {
-    await readFile(pythonPath)
-    await readFile(comfyMain)
+    await access(pythonPath)
+    await access(comfyMain)
   } catch {
     setComfyStatus({
       phase: 'error',
@@ -795,6 +797,9 @@ function createWindow(): void {
     }
   })
   mainWindow.setMenu(null)
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -1043,6 +1048,24 @@ async function cancelComfyPrompt(promptId: string): Promise<void> {
       body: JSON.stringify({ prompt_id: promptId })
     })
   ])
+}
+
+async function cancelSessionGenerations(sessionId: string): Promise<void> {
+  for (const [key, job] of [...generationJobs]) {
+    if (job.request.sessionId !== sessionId) continue
+    job.controller.abort()
+    if (job.state === 'queued') {
+      const queueIndex = generationQueue.indexOf(key)
+      if (queueIndex >= 0) generationQueue.splice(queueIndex, 1)
+      generationJobs.delete(key)
+      job.reject(new Error('Generation canceled'))
+    } else if (job.promptId) {
+      await cancelComfyPrompt(job.promptId)
+    }
+  }
+  for (const key of [...latestGenerationResultPaths.keys()]) {
+    if (key.startsWith(`${sessionId}:`)) latestGenerationResultPaths.delete(key)
+  }
 }
 
 async function cancelGeneration(sessionId: string, nodeId: string): Promise<boolean> {
@@ -1307,6 +1330,7 @@ function registerIpc(): void {
   ipcMain.handle('session:save', (_event, sessionId: string, snapshot: SessionSnapshot) => saveSession(sessionId, snapshot))
   ipcMain.handle('session:copy-assets', (_event, sourceSessionId: string, targetSessionId: string, sourcePaths: string[]) => copySessionAssets(sourceSessionId, targetSessionId, sourcePaths))
   ipcMain.handle('session:delete', async (_event, sessionId: string): Promise<LibraryBootstrap> => {
+    await cancelSessionGenerations(sessionId)
     await rm(sessionDirectory(sessionId), { recursive: true, force: true })
     return buildLibraryBootstrap()
   })
