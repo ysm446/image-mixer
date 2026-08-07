@@ -167,6 +167,13 @@ export interface GenerationStartedEvent {
   startedAtMs: number
 }
 
+export interface GenerationProgressEvent {
+  sessionId: string
+  nodeId: string
+  value: number
+  max: number
+}
+
 export interface GeneratedImage extends ImageAsset {
   promptId: string
   seed: number

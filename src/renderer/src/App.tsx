@@ -20,7 +20,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT, DEFAULT_TEXT_TRANSFORM_SYSTEM_PROMPT } from '../../main/types'
-import type { BatchFolderSelection, BatchManifest, BatchManifestItem, ComfyStatus, GeneratedImage, GenerateSettings, ImageAsset, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SessionViewport } from '../../main/types'
+import type { BatchFolderSelection, BatchManifest, BatchManifestItem, ComfyStatus, GeneratedImage, GenerateSettings, GenerationProgressEvent, ImageAsset, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SessionViewport } from '../../main/types'
 import { SystemResourceMonitor } from './SystemResourceMonitor'
 
 type RenderState = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
@@ -1026,6 +1026,8 @@ function Editor(): React.JSX.Element {
   const [renameSaving, setRenameSaving] = useState(false)
   const [previewImage, setPreviewImage] = useState<ImageAsset | null>(null)
   const [screenshotNotice, setScreenshotNotice] = useState<string | null>(null)
+  const [statusNotice, setStatusNotice] = useState<{ text: string } | null>(null)
+  const [generationProgress, setGenerationProgress] = useState<GenerationProgressEvent | null>(null)
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const storedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY))
     return Number.isFinite(storedWidth) && storedWidth > 0 ? clampSidebarWidth(storedWidth) : DEFAULT_SIDEBAR_WIDTH
@@ -1210,6 +1212,7 @@ function Editor(): React.JSX.Element {
 
   useEffect(() => window.imageMixer.onGenerationStarted(({ sessionId, nodeId, startedAtMs }) => {
     generationStartTimes.current.set(generationJobKey(sessionId, nodeId), startedAtMs)
+    setGenerationProgress(null)
     if (activeSessionIdRef.current !== sessionId) return
     setNodes((current) => current.map((node) => (
       node.id === nodeId && node.data.kind === 'generate'
@@ -1217,6 +1220,21 @@ function Editor(): React.JSX.Element {
         : node
     )))
   }), [setNodes])
+
+  useEffect(() => window.imageMixer.onGenerationProgress((progress) => {
+    if (activeSessionIdRef.current !== progress.sessionId) return
+    setGenerationProgress(progress)
+  }), [])
+
+  useEffect(() => {
+    if (!statusNotice) return
+    const timer = window.setTimeout(() => setStatusNotice(null), 3000)
+    return () => window.clearTimeout(timer)
+  }, [statusNotice])
+
+  const showStatusNotice = useCallback((text: string): void => {
+    setStatusNotice({ text })
+  }, [])
 
   useEffect(() => {
     const removeDelta = window.imageMixer.onImageDescriptionDelta(({ descriptionId, sessionId, nodeId, content }) => {
@@ -1611,20 +1629,24 @@ function Editor(): React.JSX.Element {
       const startedAtMs = generationStartTimes.current.get(key)
       generationStartTimes.current.delete(key)
       canceledGenerationIds.current.delete(key)
+      setGenerationProgress((current) => current?.nodeId === nodeId ? null : current)
       if (activeSessionIdRef.current === sessionId) {
         updateNode(nodeId, { state: 'succeeded', result, error: null, durationMs: startedAtMs == null ? null : Date.now() - startedAtMs, startedAtMs: null })
+        showStatusNotice(`生成が完了しました: ${target.data.title}`)
       }
     } catch (error) {
       const startedAtMs = generationStartTimes.current.get(key)
       generationStartTimes.current.delete(key)
       const wasCanceled = canceledGenerationIds.current.delete(key) || (error instanceof Error && error.message === 'Generation canceled')
+      setGenerationProgress((current) => current?.nodeId === nodeId ? null : current)
       if (activeSessionIdRef.current === sessionId) {
         updateNode(nodeId, wasCanceled
           ? { state: 'canceled', error: null, durationMs: startedAtMs == null ? null : Date.now() - startedAtMs, startedAtMs: null }
           : { state: 'failed', error: error instanceof Error ? error.message : String(error), durationMs: startedAtMs == null ? null : Date.now() - startedAtMs, startedAtMs: null })
+        showStatusNotice(wasCanceled ? `生成をキャンセルしました: ${target.data.title}` : `生成に失敗しました: ${target.data.title}`)
       }
     }
-  }, [activeSession, edges, nodes, updateNode])
+  }, [activeSession, edges, nodes, showStatusNotice, updateNode])
 
   const runBatch = useCallback(async (nodeId: string) => {
     if (!activeSession) return
@@ -1743,13 +1765,15 @@ function Editor(): React.JSX.Element {
         durationMs: Date.now() - startedAtMs,
         startedAtMs: null
       })
+      showStatusNotice(canceled ? '一括処理をキャンセルしました' : `一括処理が完了しました (成功 ${succeeded} / 失敗 ${failed})`)
     } catch (error) {
       updateNode(nodeId, { state: batchCancelRequested.current.has(batchKey) ? 'canceled' : 'failed', currentFile: null, error: batchCancelRequested.current.has(batchKey) ? null : error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAtMs, startedAtMs: null })
     } finally {
       batchCurrentJobIds.current.delete(batchKey)
       batchCancelRequested.current.delete(batchKey)
+      setGenerationProgress(null)
     }
-  }, [activeSession, edges, nodes, updateNode])
+  }, [activeSession, edges, nodes, showStatusNotice, updateNode])
 
   const cancelBatch = useCallback(async (nodeId: string) => {
     if (!activeSession) return
@@ -1799,24 +1823,27 @@ function Editor(): React.JSX.Element {
     if (!result) return false
     try {
       await window.imageMixer.copyImage(result.path)
+      showStatusNotice('生成画像をクリップボードへコピーしました')
       return true
     } catch (error) {
       updateNode(nodeId, { error: error instanceof Error ? error.message : String(error) })
       return false
     }
-  }, [nodes, updateNode])
+  }, [nodes, showStatusNotice, updateNode])
 
   const saveResult = useCallback(async (nodeId: string): Promise<boolean> => {
     const target = nodes.find((node) => node.id === nodeId)
     const result = target?.data.kind === 'generate' ? target.data.result : null
     if (!result) return false
     try {
-      return await window.imageMixer.saveImageCopy(result.path)
+      const saved = await window.imageMixer.saveImageCopy(result.path)
+      if (saved) showStatusNotice('生成画像を保存しました')
+      return saved
     } catch (error) {
       updateNode(nodeId, { error: error instanceof Error ? error.message : String(error) })
       return false
     }
-  }, [nodes, updateNode])
+  }, [nodes, showStatusNotice, updateNode])
 
   const copySelectedNodes = useCallback((): boolean => {
     if (!activeSession) return false
@@ -1842,8 +1869,9 @@ function Editor(): React.JSX.Element {
       pasteCount: 0
     }
     setSidebarError(null)
+    showStatusNotice(`${selectedNodes.length}個のノードをコピーしました`)
     return true
-  }, [activeSession, edges, nodes])
+  }, [activeSession, edges, nodes, showStatusNotice])
 
   const pasteSelectedNodes = useCallback(async (): Promise<boolean> => {
     const clipboard = nodeClipboard.current
@@ -1940,12 +1968,13 @@ function Editor(): React.JSX.Element {
       setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...pastedNodes])
       setEdges((current) => [...current.map((edge) => ({ ...edge, selected: false })), ...pastedEdges])
       setSidebarError(null)
+      showStatusNotice(`${pastedNodes.length}個のノードを貼り付けました`)
       return true
     } catch (error) {
       setSidebarError(`ノードを貼り付けられませんでした: ${error instanceof Error ? error.message : String(error)}`)
       return false
     }
-  }, [activeSession, edges, nodes, screenToFlowPosition, setEdges, setNodes])
+  }, [activeSession, edges, nodes, screenToFlowPosition, setEdges, setNodes, showStatusNotice])
 
   useEffect(() => {
     const handleClipboardShortcut = (event: KeyboardEvent): void => {
@@ -2294,6 +2323,16 @@ function Editor(): React.JSX.Element {
   }), [cancelBatch, cancelGeneration, cancelImageDescription, cancelTextTransform, chooseBatchFolder, chooseImage, comfy.phase, copyResult, describeImage, dropImage, generate, hasDescribeImageInput, hasImageInput, llm.loadedModelPath, llm.models, llm.phase, llm.restartRequired, revealBatchOutput, runBatch, saveResult, transformText, updateNode])
 
   const nodeTypes = useMemo(() => ({ editor: EditorNodeComponent }), [])
+  const generationActivity = useMemo(() => {
+    const runningNode = nodes.find((node) => (node.data.kind === 'generate' || node.data.kind === 'batch-generate') && node.data.state === 'running')
+    const queuedCount = nodes.filter((node) => node.data.kind === 'generate' && node.data.state === 'queued').length
+    if (!runningNode) return queuedCount > 0 ? { title: null, percent: null, queuedCount } : null
+    const matchesRunning = generationProgress != null && (generationProgress.nodeId === runningNode.id || generationProgress.nodeId.startsWith(`${runningNode.id}-batch-`))
+    const percent = matchesRunning && generationProgress.max > 0
+      ? Math.min(100, Math.round((generationProgress.value / generationProgress.max) * 100))
+      : null
+    return { title: runningNode.data.title, percent, queuedCount }
+  }, [generationProgress, nodes])
   const selectedLlmModel = llm.models.find((model) => model.path === llm.config.selectedModelPath) ?? null
   const loadedLlmModel = llm.models.find((model) => model.path === llm.loadedModelPath) ?? null
   const llmBusy = llmTogglePending || llm.phase === 'loading' || llm.phase === 'unloading'
@@ -2533,8 +2572,22 @@ function Editor(): React.JSX.Element {
           </section>
         </div>
         <footer className='status-bar'>
-          <div className='status-summary'>
-            <span className='status-session' title={activeSession?.name}>{activeSession?.name ?? 'セッションなし'}</span>
+          <div className='status-activity'>
+            {statusNotice && <span className='status-notice'>{statusNotice.text}</span>}
+            {generationActivity && (
+              <span className='status-generation'>
+                <span className='status-generation-label'>
+                  {generationActivity.title ? `生成中: ${generationActivity.title}` : '生成待機中'}
+                  {generationActivity.queuedCount > 0 ? ` (待機 ${generationActivity.queuedCount}件)` : ''}
+                </span>
+                {generationActivity.percent != null && (
+                  <>
+                    <span className='status-progress-track'><span style={{ width: `${generationActivity.percent}%` }} /></span>
+                    <span className='status-progress-value'>{generationActivity.percent}%</span>
+                  </>
+                )}
+              </span>
+            )}
           </div>
           <SystemResourceMonitor />
         </footer>

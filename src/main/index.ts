@@ -8,7 +8,7 @@ import * as os from 'node:os'
 import sharp from 'sharp'
 import { DEFAULT_LLM_CONFIG, LlamaServerManager } from './llamaServer'
 import { DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT, DEFAULT_TEXT_TRANSFORM_SYSTEM_PROMPT } from './types'
-import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from './types'
+import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationProgressEvent, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from './types'
 
 const COMFY_URL = 'http://127.0.0.1:8189'
 const COMFY_PORT = '8189'
@@ -931,6 +931,37 @@ function validateGenerateRequest(request: GenerateRequest): void {
   if (!Number.isFinite(cfg) || cfg < 0 || cfg > 100) throw new Error('CFG must be between 0 and 100')
 }
 
+function watchGenerationProgress(clientId: string, request: GenerateRequest): () => void {
+  let socket: WebSocket | null = null
+  try {
+    socket = new WebSocket(`${COMFY_URL.replace('http', 'ws')}/ws?clientId=${encodeURIComponent(clientId)}`)
+    socket.onmessage = (event) => {
+      if (typeof event.data !== 'string') return
+      try {
+        const parsed = JSON.parse(event.data) as { type?: string; data?: { value?: number; max?: number } }
+        if (parsed.type !== 'progress' || typeof parsed.data?.value !== 'number' || typeof parsed.data.max !== 'number') return
+        const payload: GenerationProgressEvent = {
+          sessionId: request.sessionId,
+          nodeId: request.nodeId,
+          value: parsed.data.value,
+          max: parsed.data.max
+        }
+        mainWindow?.webContents.send('image:generation-progress', payload)
+      } catch {
+        // Ignore malformed frames; progress display is best-effort.
+      }
+    }
+    socket.onerror = () => {
+      // Progress is best-effort; generation itself is tracked via HTTP polling.
+    }
+  } catch {
+    socket = null
+  }
+  return () => {
+    try { socket?.close() } catch { /* Already closed. */ }
+  }
+}
+
 async function runImageGeneration(job: GenerationJob): Promise<GeneratedImage> {
   const queuedRequest = job.request
   if (!(await isComfyReady())) throw new Error('ComfyUI is not ready')
@@ -947,6 +978,7 @@ async function runImageGeneration(job: GenerationJob): Promise<GeneratedImage> {
   const request: GenerateRequest = { ...queuedRequest, imagePaths }
   const connectedImageCount = imagePaths.filter((path): path is string => Boolean(path)).length
   let destination: string | null = null
+  let stopProgressWatch: (() => void) | null = null
   try {
     const workflowName = connectedImageCount > 0 ? 'Qwen-Rapid-AIO.json' : 'Qwen-Rapid-AIO-Generate.json'
     const workflowPath = join(projectRoot(), 'workflows', workflowName)
@@ -956,6 +988,7 @@ async function runImageGeneration(job: GenerationJob): Promise<GeneratedImage> {
     throwIfGenerationCanceled(job.controller.signal)
     const prompt = applyRequest(workflow, request, uploads)
     const clientId = randomUUID()
+    stopProgressWatch = watchGenerationProgress(clientId, request)
     const response = await fetch(`${COMFY_URL}/prompt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1003,6 +1036,8 @@ async function runImageGeneration(job: GenerationJob): Promise<GeneratedImage> {
     }
     if (job.controller.signal.aborted) throw new Error('Generation canceled')
     throw error
+  } finally {
+    stopProgressWatch?.()
   }
 }
 

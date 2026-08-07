@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import type { BatchManifest, ComfyStatus, GenerateRequest, GenerationStartedEvent, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LlmConfig, LlmStatus, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from '../main/types'
+import type { BatchManifest, ComfyStatus, GenerateRequest, GenerationProgressEvent, GenerationStartedEvent, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LlmConfig, LlmStatus, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from '../main/types'
 import type { ImageMixerApi } from './bridge'
 
 const api: ImageMixerApi = {
@@ -88,6 +88,11 @@ const api: ImageMixerApi = {
     const listener = (_event: IpcRendererEvent, generation: GenerationStartedEvent): void => callback(generation)
     ipcRenderer.on('image:generation-started', listener)
     return () => ipcRenderer.off('image:generation-started', listener)
+  },
+  onGenerationProgress: (callback) => {
+    const listener = (_event: IpcRendererEvent, progress: GenerationProgressEvent): void => callback(progress)
+    ipcRenderer.on('image:generation-progress', listener)
+    return () => ipcRenderer.off('image:generation-progress', listener)
   },
   onSystemResources: (callback) => {
     const listener = (_event: IpcRendererEvent, resources: SystemResources): void => callback(resources)

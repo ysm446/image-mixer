@@ -1,4 +1,4 @@
-import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from '../main/types'
+import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationProgressEvent, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from '../main/types'
 
 export interface ImageMixerApi {
   getComfyStatus(): Promise<ComfyStatus>
@@ -47,6 +47,7 @@ export interface ImageMixerApi {
   onTextTransformDone(callback: (event: TextTransformStreamEvent) => void): () => void
   onTextTransformError(callback: (event: TextTransformErrorEvent) => void): () => void
   onGenerationStarted(callback: (event: GenerationStartedEvent) => void): () => void
+  onGenerationProgress(callback: (event: GenerationProgressEvent) => void): () => void
   onSystemResources(callback: (resources: SystemResources) => void): () => void
 }
 
