@@ -503,7 +503,7 @@ function TextTransformNode({ id, data, selected }: NodeProps<EditorNode>): React
     if (!editor) return
     editor.style.height = 'auto'
     const borderHeight = editor.offsetHeight - editor.clientHeight
-    editor.style.height = `${Math.max(180, editor.scrollHeight + borderHeight)}px`
+    editor.style.height = `${Math.max(100, editor.scrollHeight + borderHeight)}px`
   }, [textDraft])
 
   useEffect(() => {

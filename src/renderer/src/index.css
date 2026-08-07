@@ -193,7 +193,7 @@ button { color: inherit; }
 .transform-instruction-editor:focus { border-color: #8e65d1; }
 .transform-instruction-editor:disabled { opacity: .6; }
 .transform-output-label { margin-top: 11px; }
-.transform-output-editor { min-height: 180px; margin-top: 6px; }
+.transform-output-editor { min-height: 100px; margin-top: 6px; }
 .transform-output-editor:focus { border-color: #8e65d1; }
 .transform-output-editor:read-only { color: #dfe7f2; }
 .transform-system-toggle { border-color: #4b3d61; background: #17111f; }
