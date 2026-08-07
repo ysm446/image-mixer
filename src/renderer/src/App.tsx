@@ -2421,7 +2421,9 @@ function Editor(): React.JSX.Element {
             <span className='comfy-toggle-label'>{comfy.phase === 'ready' ? 'Unload' : comfy.phase === 'starting' ? 'Loading…' : comfy.phase === 'stopping' ? 'Unloading…' : 'Load'}</span>
           </button>
           <button type='button' className='llm-settings-button' title='設定' aria-label='設定' onClick={openLlmSettings}>
-            <svg viewBox='0 0 24 24' aria-hidden='true'><path d='M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z' /><path d='M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3.01V3h4v.08a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z' /></svg>
+            <svg viewBox='0 0 24 24' aria-hidden='true'>
+              <path fillRule='evenodd' d='M19.14 12.94a7.07 7.07 0 0 0 .06-.94 7.07 7.07 0 0 0-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39 1a7.13 7.13 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.89 2h-3.78a.5.5 0 0 0-.49.42l-.36 2.54a7.13 7.13 0 0 0-1.63.94l-2.39-1a.5.5 0 0 0-.61.22L2.71 8.44a.5.5 0 0 0 .12.64l2.03 1.58a7.07 7.07 0 0 0-.06.94c0 .32.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .61.22l2.39-1c.5.38 1.05.7 1.63.94l.36 2.54a.5.5 0 0 0 .49.42h3.78a.5.5 0 0 0 .49-.42l.36-2.54a7.13 7.13 0 0 0 1.63-.94l2.39 1a.5.5 0 0 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64ZM12 15.5A3.5 3.5 0 1 1 15.5 12 3.5 3.5 0 0 1 12 15.5Z' />
+            </svg>
           </button>
         </header>
         <div className='workspace' style={{ gridTemplateColumns: sidebarVisible ? sidebarWidth + 'px 0 minmax(0, 1fr)' : 'minmax(0, 1fr)' }}>
