@@ -22,7 +22,7 @@ export interface ImageMixerApi {
   renameSession(sessionId: string, name: string): Promise<{ session: SessionRecord; sessions: SessionRecord[] }>
   duplicateSession(sessionId: string): Promise<{ session: SessionRecord; sessions: SessionRecord[]; snapshot: SessionSnapshot }>
   loadSession(sessionId: string): Promise<{ session: SessionRecord; snapshot: SessionSnapshot }>
-  saveSession(sessionId: string, snapshot: SessionSnapshot): Promise<SessionRecord>
+  saveSession(sessionId: string, snapshot: SessionSnapshot, protectedPaths?: string[]): Promise<SessionRecord>
   copySessionAssets(sourceSessionId: string, targetSessionId: string, sourcePaths: string[]): Promise<CopiedSessionAsset[]>
   deleteSession(sessionId: string): Promise<LibraryBootstrap>
   chooseBatchFolder(): Promise<BatchFolderSelection | null>

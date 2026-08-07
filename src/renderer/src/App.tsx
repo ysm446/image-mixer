@@ -995,6 +995,45 @@ function generationJobKey(sessionId: string, nodeId: string): string {
   return `${sessionId}:${nodeId}`
 }
 
+type HistoryEntry = {
+  nodes: EditorNode[]
+  edges: EditorEdge[]
+  signature: string
+}
+
+const HISTORY_LIMIT = 50
+
+// Execution progress (state, timings) is excluded so running jobs never create or revert history entries.
+// Result images are tracked by path so undo can restore a previous generation result.
+function historySignature(nodes: EditorNode[], edges: EditorEdge[]): string {
+  const nodePart = nodes.map((node) => {
+    const data = { ...(node.data as Record<string, unknown>) }
+    if (data.image) data.image = (data.image as ImageAsset).path
+    if (data.result) data.result = (data.result as GeneratedImage).path
+    delete data.state
+    delete data.error
+    delete data.durationMs
+    delete data.startedAtMs
+    delete data.total
+    delete data.completed
+    delete data.succeeded
+    delete data.failed
+    delete data.currentFile
+    delete data.outputDirectory
+    return { id: node.id, x: Math.round(node.position.x), y: Math.round(node.position.y), data }
+  })
+  const edgePart = edges.map((edge) => [edge.source, edge.sourceHandle ?? null, edge.target, edge.targetHandle ?? null])
+  return JSON.stringify([nodePart, edgePart])
+}
+
+function makeHistoryEntry(nodes: EditorNode[], edges: EditorEdge[], signature: string): HistoryEntry {
+  return {
+    nodes: nodes.map((node) => structuredClone({ ...node, selected: false, dragging: false })),
+    edges: edges.map((edge) => structuredClone({ ...edge, selected: false })),
+    signature
+  }
+}
+
 function promptTextFromNode(node: EditorNode | undefined): string {
   return node?.data.kind === 'prompt' || node?.data.kind === 'image-describe' || node?.data.kind === 'text-transform' ? node.data.text.trim() : ''
 }
@@ -1057,10 +1096,15 @@ function Editor(): React.JSX.Element {
   const imageDescriptionIds = useRef(new Map<string, string>())
   const textTransformationIds = useRef(new Map<string, string>())
   const viewportToRestore = useRef<SessionViewport | null>(null)
+  const historyRef = useRef<{ entries: HistoryEntry[]; index: number }>({ entries: [], index: -1 })
+  const nodesRef = useRef<EditorNode[]>([])
+  const edgesRef = useRef<EditorEdge[]>([])
   const sidebarResizingRef = useRef(false)
   const sidebarWidthRef = useRef(sidebarWidth)
   activeSessionIdRef.current = activeSession?.id ?? null
   sidebarWidthRef.current = sidebarWidth
+  nodesRef.current = nodes
+  edgesRef.current = edges
 
   const resizeSidebar = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
     if (!sidebarResizingRef.current) return
@@ -1414,19 +1458,120 @@ function Editor(): React.JSX.Element {
     })
   }, [applyBootstrap])
 
+  const historyProtectedPaths = useCallback((): string[] => {
+    const paths = new Set<string>()
+    const collect = (nodes: EditorNode[]): void => {
+      for (const node of nodes) {
+        const data = node.data as { image?: ImageAsset | null; result?: GeneratedImage | null }
+        if (data.image?.path) paths.add(data.image.path)
+        if (data.result?.path) paths.add(data.result.path)
+      }
+    }
+    for (const entry of historyRef.current.entries) collect(entry.nodes)
+    const clipboard = nodeClipboard.current
+    if (clipboard && clipboard.sessionId === activeSessionIdRef.current) collect(clipboard.nodes)
+    return [...paths]
+  }, [])
+
   useEffect(() => {
     if (!activeSession || hydratedSessionId !== activeSession.id) return
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
       const snapshot: SessionSnapshot = { nodes, edges, viewport: canvasViewport ?? getViewport() }
-      void window.imageMixer.saveSession(activeSession.id, snapshot).catch((error: unknown) => {
+      void window.imageMixer.saveSession(activeSession.id, snapshot, historyProtectedPaths()).catch((error: unknown) => {
         setSidebarError(error instanceof Error ? error.message : String(error))
       })
     }, 500)
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
-  }, [activeSession, canvasViewport, edges, getViewport, hydratedSessionId, nodes])
+  }, [activeSession, canvasViewport, edges, getViewport, historyProtectedPaths, hydratedSessionId, nodes])
+
+  const flushHistory = useCallback((): void => {
+    const history = historyRef.current
+    const signature = historySignature(nodesRef.current, edgesRef.current)
+    if (history.entries[history.index]?.signature === signature) return
+    history.entries = [...history.entries.slice(0, history.index + 1), makeHistoryEntry(nodesRef.current, edgesRef.current, signature)].slice(-HISTORY_LIMIT)
+    history.index = history.entries.length - 1
+  }, [])
+
+  useEffect(() => {
+    if (!hydratedSessionId) return
+    historyRef.current = { entries: [], index: -1 }
+    flushHistory()
+  }, [flushHistory, hydratedSessionId])
+
+  useEffect(() => {
+    if (!activeSession || hydratedSessionId !== activeSession.id) return
+    const timer = window.setTimeout(flushHistory, 400)
+    return () => window.clearTimeout(timer)
+  }, [activeSession, edges, flushHistory, hydratedSessionId, nodes])
+
+  const applyHistoryEntry = useCallback((entry: HistoryEntry): void => {
+    setNodes((current) => {
+      const liveById = new Map(current.map((node) => [node.id, node]))
+      return entry.nodes.map((node) => {
+        const restored = structuredClone(node)
+        const data = restored.data as EditorData
+        const liveData = liveById.get(node.id)?.data as EditorData | undefined
+        if (liveData && liveData.kind === data.kind) {
+          const livePending = 'state' in liveData && (liveData.state === 'queued' || liveData.state === 'running')
+          if (data.kind === 'generate' && liveData.kind === 'generate') {
+            Object.assign(data, { state: liveData.state, error: liveData.error, durationMs: liveData.durationMs, startedAtMs: liveData.startedAtMs })
+            if (livePending) data.result = liveData.result
+          } else if (data.kind === 'batch-generate' && liveData.kind === 'batch-generate') {
+            Object.assign(data, { state: liveData.state, error: liveData.error, durationMs: liveData.durationMs, startedAtMs: liveData.startedAtMs, currentFile: liveData.currentFile })
+            if (livePending) {
+              Object.assign(data, { result: liveData.result, outputDirectory: liveData.outputDirectory, total: liveData.total, completed: liveData.completed, succeeded: liveData.succeeded, failed: liveData.failed })
+            }
+          } else if ((data.kind === 'image-describe' && liveData.kind === 'image-describe') || (data.kind === 'text-transform' && liveData.kind === 'text-transform')) {
+            Object.assign(data, { state: liveData.state, error: liveData.error, durationMs: liveData.durationMs, startedAtMs: liveData.startedAtMs })
+            if (liveData.state === 'queued' || liveData.state === 'running') data.text = liveData.text
+          }
+        } else if ('state' in data && (data.state === 'queued' || data.state === 'running')) {
+          data.state = 'canceled'
+          data.error = null
+          data.startedAtMs = null
+          if (data.kind === 'batch-generate') data.currentFile = null
+        }
+        return restored
+      })
+    })
+    setEdges(entry.edges.map((edge) => structuredClone(edge)))
+  }, [setEdges, setNodes])
+
+  const undo = useCallback((): boolean => {
+    flushHistory()
+    const history = historyRef.current
+    if (history.index <= 0) return false
+    history.index -= 1
+    applyHistoryEntry(history.entries[history.index])
+    return true
+  }, [applyHistoryEntry, flushHistory])
+
+  const redo = useCallback((): boolean => {
+    const history = historyRef.current
+    if (history.index >= history.entries.length - 1) return false
+    history.index += 1
+    applyHistoryEntry(history.entries[history.index])
+    return true
+  }, [applyHistoryEntry])
+
+  useEffect(() => {
+    const handleUndoShortcut = (event: KeyboardEvent): void => {
+      if (isEditableElement(event.target) || renameTarget || previewImage || (!event.ctrlKey && !event.metaKey) || event.altKey) return
+      const key = event.key.toLowerCase()
+      if (key === 'z' && !event.shiftKey) {
+        event.preventDefault()
+        if (undo()) showStatusNotice('元に戻しました')
+      } else if (key === 'y' || (key === 'z' && event.shiftKey)) {
+        event.preventDefault()
+        if (redo()) showStatusNotice('やり直しました')
+      }
+    }
+    window.addEventListener('keydown', handleUndoShortcut)
+    return () => window.removeEventListener('keydown', handleUndoShortcut)
+  }, [previewImage, redo, renameTarget, showStatusNotice, undo])
 
   const updateNode = useCallback((nodeId: string, patch: Partial<EditorData>) => {
     setNodes((current) => current.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, ...patch } as EditorData } : node))
@@ -1600,9 +1745,10 @@ function Editor(): React.JSX.Element {
         imagePaths.push(source.data.image.path)
         imageSourceNodeIds.push(null)
       } else if (source?.data.kind === 'generate') {
+        const pending = source.data.state === 'queued' || source.data.state === 'running'
         imagePaths.push(source.data.result?.path ?? null)
-        imageSourceNodeIds.push(source.id)
-        if (!source.data.result && source.data.state !== 'queued' && source.data.state !== 'running') hasEmptyImageConnection = true
+        imageSourceNodeIds.push(pending ? source.id : null)
+        if (!source.data.result && !pending) hasEmptyImageConnection = true
       } else {
         imagePaths.push(null)
         imageSourceNodeIds.push(null)
@@ -1694,12 +1840,13 @@ function Editor(): React.JSX.Element {
         referencePaths.push(source.data.image.path)
         referenceSourceNodeIds.push(null)
       } else if (source?.data.kind === 'generate') {
-        if (!source.data.result && source.data.state !== 'queued' && source.data.state !== 'running') {
+        const pending = source.data.state === 'queued' || source.data.state === 'running'
+        if (!source.data.result && !pending) {
           updateNode(nodeId, { state: 'failed', error: handle + 'へ結果のあるImage Generateノードを接続してください。' })
           return
         }
         referencePaths.push(source.data.result?.path ?? null)
-        referenceSourceNodeIds.push(source.id)
+        referenceSourceNodeIds.push(pending ? source.id : null)
       } else {
         referencePaths.push(null)
         referenceSourceNodeIds.push(null)
@@ -2164,8 +2311,8 @@ function Editor(): React.JSX.Element {
 
   const saveCurrentSession = useCallback(async () => {
     if (!activeSession || hydratedSessionId !== activeSession.id) return
-    await window.imageMixer.saveSession(activeSession.id, { nodes, edges, viewport: getViewport() })
-  }, [activeSession, edges, getViewport, hydratedSessionId, nodes])
+    await window.imageMixer.saveSession(activeSession.id, { nodes, edges, viewport: getViewport() }, historyProtectedPaths())
+  }, [activeSession, edges, getViewport, historyProtectedPaths, hydratedSessionId, nodes])
 
   const chooseLibrary = useCallback(async () => {
     try {
@@ -2399,9 +2546,7 @@ function Editor(): React.JSX.Element {
               aria-label={llmLoaded ? 'モデルをアンロード' : llm.restartRequired ? 'モデルを再ロード' : '選択中のモデルをロード'}
               onClick={() => void toggleLlm()}
             >
-              {llmBusy ? (
-                <svg className='llm-toggle-icon spinning' viewBox='0 0 24 24' aria-hidden='true'><path d='M20 12a8 8 0 1 1-2.34-5.66' /></svg>
-              ) : llmLoaded ? (
+              {llmLoaded || llm.phase === 'unloading' ? (
                 <svg className='llm-toggle-icon' viewBox='0 0 24 24' aria-hidden='true'><path d='m12 3 8 9H4l8-9Z' /><rect x='4' y='17' width='16' height='3' rx='1' /></svg>
               ) : (
                 <svg className='llm-toggle-icon' viewBox='0 0 24 24' aria-hidden='true'><path d='M12 4v11m-4-4 4 4 4-4' /><path d='M5 19h14' /></svg>

@@ -413,10 +413,20 @@ function referencedSessionAssets(sessionId: string, snapshot: SessionSnapshot): 
   return referenced
 }
 
-async function cleanupUnusedSessionAssets(sessionId: string, snapshot: SessionSnapshot, saveStartedAt?: number): Promise<void> {
+async function cleanupUnusedSessionAssets(sessionId: string, snapshot: SessionSnapshot, saveStartedAt?: number, protectedPaths?: string[]): Promise<void> {
   const assetsDirectory = sessionAssetsDirectory(sessionId)
   // Heal stale absolute paths first so a moved library root never marks its own assets as unused.
   const referenced = referencedSessionAssets(sessionId, healSnapshotAssetPaths(sessionId, snapshot).snapshot)
+  if (protectedPaths) {
+    if (!Array.isArray(protectedPaths) || protectedPaths.length > 5000 || protectedPaths.some((path) => typeof path !== 'string')) {
+      throw new Error('Invalid protected asset list')
+    }
+    const assetsRoot = `${assetPathKey(assetsDirectory)}${sep}`
+    for (const path of protectedPaths) {
+      const key = assetPathKey(path)
+      if (key.startsWith(assetsRoot)) referenced.add(key)
+    }
+  }
   for (const key of referenced) pendingSessionAssets.delete(key)
 
   let entries
@@ -481,13 +491,13 @@ async function hydrateSnapshot(snapshot: SessionSnapshot): Promise<SessionSnapsh
   return clone
 }
 
-async function saveSession(sessionId: string, snapshot: SessionSnapshot): Promise<SessionRecord> {
+async function saveSession(sessionId: string, snapshot: SessionSnapshot, protectedPaths?: string[]): Promise<SessionRecord> {
   const saveStartedAt = Date.now()
   const current = JSON.parse(await readFile(sessionFile(sessionId), 'utf8')) as { session: SessionRecord }
   const session = { ...current.session, updatedAt: new Date().toISOString() }
   const persistedSnapshot = stripDataUrls(snapshot)
   await writeFile(sessionFile(sessionId), JSON.stringify({ session, snapshot: persistedSnapshot }, null, 2), 'utf8')
-  await cleanupUnusedSessionAssets(sessionId, persistedSnapshot, saveStartedAt)
+  await cleanupUnusedSessionAssets(sessionId, persistedSnapshot, saveStartedAt, protectedPaths)
   return session
 }
 
@@ -1399,7 +1409,7 @@ function registerIpc(): void {
     const loaded = await readSession(sessionId)
     return { session: loaded.session, snapshot: loaded.snapshot }
   })
-  ipcMain.handle('session:save', (_event, sessionId: string, snapshot: SessionSnapshot) => saveSession(sessionId, snapshot))
+  ipcMain.handle('session:save', (_event, sessionId: string, snapshot: SessionSnapshot, protectedPaths?: string[]) => saveSession(sessionId, snapshot, protectedPaths))
   ipcMain.handle('session:copy-assets', (_event, sourceSessionId: string, targetSessionId: string, sourcePaths: string[]) => copySessionAssets(sourceSessionId, targetSessionId, sourcePaths))
   ipcMain.handle('session:delete', async (_event, sessionId: string): Promise<LibraryBootstrap> => {
     await cancelSessionGenerations(sessionId)
