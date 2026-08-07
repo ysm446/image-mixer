@@ -16,6 +16,8 @@ export interface ImageMixerApi {
   cancelTextTransform(transformationId: string): Promise<boolean>
   bootstrapLibrary(): Promise<LibraryBootstrap>
   chooseLibrary(): Promise<LibraryBootstrap | null>
+  getRecentLibraries(): Promise<string[]>
+  openLibrary(rootPath: string): Promise<LibraryBootstrap>
   createSession(name: string): Promise<{ session: SessionRecord; sessions: SessionRecord[]; snapshot: SessionSnapshot }>
   renameSession(sessionId: string, name: string): Promise<{ session: SessionRecord; sessions: SessionRecord[] }>
   duplicateSession(sessionId: string): Promise<{ session: SessionRecord; sessions: SessionRecord[]; snapshot: SessionSnapshot }>

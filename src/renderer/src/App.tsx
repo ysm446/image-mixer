@@ -32,6 +32,7 @@ const DEFAULT_SIDEBAR_WIDTH = 270
 const MIN_SIDEBAR_WIDTH = 220
 const MAX_SIDEBAR_WIDTH = 520
 const SIDEBAR_WIDTH_STORAGE_KEY = 'image-mixer.sidebar-width'
+const MINIMAP_STORAGE_KEY = 'image-mixer.show-minimap'
 
 const EMPTY_LLM_STATUS: LlmStatus = {
   phase: 'stopped',
@@ -1008,7 +1009,10 @@ function Editor(): React.JSX.Element {
   const [llmSettingsOpen, setLlmSettingsOpen] = useState(false)
   const [llmSettingsDraft, setLlmSettingsDraft] = useState<LlmConfig>(EMPTY_LLM_STATUS.config)
   const [llmSettingsError, setLlmSettingsError] = useState<string | null>(null)
+  const [settingsTab, setSettingsTab] = useState<'llm' | 'display'>('llm')
+  const [showMinimap, setShowMinimap] = useState(() => window.localStorage.getItem(MINIMAP_STORAGE_KEY) !== '0')
   const [library, setLibrary] = useState<LibraryInfo | null>(null)
+  const [libraryMenu, setLibraryMenu] = useState<string[] | null>(null)
   const [sessions, setSessions] = useState<SessionRecord[]>([])
   const [activeSession, setActiveSession] = useState<SessionRecord | null>(null)
   const [hydratedSessionId, setHydratedSessionId] = useState<string | null>(null)
@@ -1171,8 +1175,14 @@ function Editor(): React.JSX.Element {
     setLlmModelPickerOpen(false)
     setLlmSettingsDraft(llm.config)
     setLlmSettingsError(null)
+    setSettingsTab('llm')
     setLlmSettingsOpen(true)
   }, [llm.config])
+
+  const toggleMinimap = useCallback((visible: boolean): void => {
+    setShowMinimap(visible)
+    window.localStorage.setItem(MINIMAP_STORAGE_KEY, visible ? '1' : '0')
+  }, [])
 
   const saveLlmSettings = useCallback(async (event: React.FormEvent): Promise<void> => {
     event.preventDefault()
@@ -1264,6 +1274,7 @@ function Editor(): React.JSX.Element {
     const closeMenus = (): void => {
       setSessionMenuId(null)
       setNodeContextMenu(null)
+      setLibraryMenu(null)
     }
     window.addEventListener('pointerdown', closeMenus)
     return () => window.removeEventListener('pointerdown', closeMenus)
@@ -2113,6 +2124,29 @@ function Editor(): React.JSX.Element {
     }
   }, [applyBootstrap, saveCurrentSession])
 
+  const toggleLibraryMenu = useCallback(async () => {
+    setSessionMenuId(null)
+    if (libraryMenu) {
+      setLibraryMenu(null)
+      return
+    }
+    try {
+      setLibraryMenu(await window.imageMixer.getRecentLibraries())
+    } catch (error) {
+      setSidebarError(error instanceof Error ? error.message : String(error))
+    }
+  }, [libraryMenu])
+
+  const openRecentLibrary = useCallback(async (rootPath: string) => {
+    setLibraryMenu(null)
+    try {
+      await saveCurrentSession()
+      applyBootstrap(await window.imageMixer.openLibrary(rootPath))
+    } catch (error) {
+      setSidebarError(error instanceof Error ? error.message : String(error))
+    }
+  }, [applyBootstrap, saveCurrentSession])
+
   const createSession = useCallback(async () => {
     try {
       let sessionNumber = 1
@@ -2313,19 +2347,33 @@ function Editor(): React.JSX.Element {
             <strong>ComfyUI</strong>
             <span className='comfy-toggle-label'>{comfy.phase === 'ready' ? 'Unload' : comfy.phase === 'starting' ? 'Loading…' : comfy.phase === 'stopping' ? 'Unloading…' : 'Load'}</span>
           </button>
-          <button type='button' className='llm-settings-button' title='Local LLM設定' aria-label='Local LLM設定' onClick={openLlmSettings}>
+          <button type='button' className='llm-settings-button' title='設定' aria-label='設定' onClick={openLlmSettings}>
             <svg viewBox='0 0 24 24' aria-hidden='true'><path d='M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z' /><path d='M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3.01V3h4v.08a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z' /></svg>
           </button>
         </header>
         <div className='workspace' style={{ gridTemplateColumns: sidebarWidth + 'px 0 minmax(0, 1fr)' }}>
           <aside className='left-sidebar'>
-            <section className='library-section'>
+            <section className='library-section' onPointerDown={(event) => event.stopPropagation()}>
               <div className='sidebar-label'>ROOT FOLDER</div>
-              <button type='button' className='library-button' onClick={() => void chooseLibrary()} title={library?.rootPath}>
+              <button type='button' className='library-button' onClick={() => void toggleLibraryMenu()} title={library?.rootPath} aria-haspopup='menu' aria-expanded={libraryMenu != null}>
                 <span className='folder-icon'>▰</span>
                 <span><strong>{library?.name ?? 'Loading…'}</strong><small>{library?.rootPath ?? 'ルートフォルダを読み込み中'}</small></span>
                 <span className='chevron'>›</span>
               </button>
+              {libraryMenu && (
+                <div className='library-menu' role='menu'>
+                  <button type='button' role='menuitem' onClick={() => { setLibraryMenu(null); void chooseLibrary() }}>
+                    <strong>フォルダを選択…</strong>
+                  </button>
+                  {libraryMenu.length > 0 && <div className='library-menu-separator' aria-hidden='true' />}
+                  {libraryMenu.map((path) => (
+                    <button key={path} type='button' role='menuitem' title={path} onClick={() => void openRecentLibrary(path)}>
+                      <strong>{path.split(/[\\/]/).pop() || path}</strong>
+                      <small>{path}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
             </section>
 
             <section className='sessions-section'>
@@ -2453,7 +2501,7 @@ function Editor(): React.JSX.Element {
               defaultEdgeOptions={{ style: { strokeWidth: 2, stroke: '#77869b' } }}
             >
               <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color='#2b3441' />
-              <MiniMap
+              {showMinimap && <MiniMap
                 position='bottom-left'
                 pannable
                 zoomable
@@ -2480,15 +2528,12 @@ function Editor(): React.JSX.Element {
                   if (node.data.kind === 'batch-generate') return '#ffb17d'
                   return '#ffb17d'
                 }}
-              />
+              />}
             </ReactFlow>
           </section>
         </div>
         <footer className='status-bar'>
           <div className='status-summary'>
-            <span className={`status-indicator status-${comfy.phase}`} />
-            <span>ComfyUI: {comfy.phase === 'ready' ? 'Ready' : comfy.phase}</span>
-            <span className='status-separator' />
             <span className='status-session' title={activeSession?.name}>{activeSession?.name ?? 'セッションなし'}</span>
           </div>
           <SystemResourceMonitor />
@@ -2552,10 +2597,17 @@ function Editor(): React.JSX.Element {
           <div className='llm-settings-backdrop' onPointerDown={() => setLlmSettingsOpen(false)}>
             <form className='llm-settings-dialog' onSubmit={(event) => void saveLlmSettings(event)} onPointerDown={(event) => event.stopPropagation()}>
               <header>
-                <div><span>LOCAL LLM</span><h2>モデルとサーバー設定</h2></div>
+                <div><span>SETTINGS</span><h2>設定</h2></div>
                 <button type='button' className='llm-dialog-close' aria-label='閉じる' onClick={() => setLlmSettingsOpen(false)}>×</button>
               </header>
 
+              <div className='llm-settings-body'>
+                <nav className='llm-settings-nav' aria-label='設定セクション'>
+                  <button type='button' className={settingsTab === 'llm' ? 'active' : ''} onClick={() => setSettingsTab('llm')}>Local LLM</button>
+                  <button type='button' className={settingsTab === 'display' ? 'active' : ''} onClick={() => setSettingsTab('display')}>表示</button>
+                </nav>
+                <div className='llm-settings-panel'>
+                  {settingsTab === 'llm' && (<>
               <section className='llm-settings-section'>
                 <div className='llm-settings-section-title'>モデル</div>
                 <label className='llm-settings-field llm-settings-wide'>
@@ -2593,6 +2645,18 @@ function Editor(): React.JSX.Element {
                   <label><input type='checkbox' checked={llmSettingsDraft.mmprojOffload} onChange={(event) => setLlmSettingsDraft((current) => ({ ...current, mmprojOffload: event.target.checked }))} /><span>mmproj GPU offload</span></label>
                 </div>
               </section>
+                  </>)}
+                  {settingsTab === 'display' && (
+                    <section className='llm-settings-section'>
+                      <div className='llm-settings-section-title'>表示</div>
+                      <div className='llm-setting-toggles'>
+                        <label><input type='checkbox' checked={showMinimap} onChange={(event) => toggleMinimap(event.target.checked)} /><span>ミニマップを表示</span></label>
+                      </div>
+                      <p className='llm-settings-note'>変更は即座に反映され、次回起動時も保持されます。</p>
+                    </section>
+                  )}
+                </div>
+              </div>
 
               {llmSettingsError && <div className='llm-settings-error'>{llmSettingsError}</div>}
               <footer>

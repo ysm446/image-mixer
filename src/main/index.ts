@@ -79,6 +79,7 @@ let llamaServer: LlamaServerManager | null = null
 let llmConfig: LlmConfig = { ...DEFAULT_LLM_CONFIG }
 let isQuitting = false
 let libraryRoot = ''
+let libraryHistory: string[] = []
 let cpuSample = sampleCpus()
 let cachedGpuInfo: GpuInfo = { gpuUsage: null, vramUsed: null, vramTotal: null }
 let systemResourcesInterval: ReturnType<typeof setInterval> | null = null
@@ -197,22 +198,32 @@ function resolveSessionAsset(sourcePath: string): string {
   return target
 }
 
+function rememberLibraryRoot(): void {
+  const current = resolve(libraryRoot)
+  libraryHistory = [current, ...libraryHistory.filter((path) => assetPathKey(path) !== assetPathKey(current))].slice(0, 10)
+}
+
 async function loadLibraryRoot(): Promise<void> {
   try {
-    const parsed = JSON.parse(await readFile(appSettingsPath(), 'utf8')) as { libraryRoot?: unknown; llm?: Partial<LlmConfig> }
+    const parsed = JSON.parse(await readFile(appSettingsPath(), 'utf8')) as { libraryRoot?: unknown; libraryHistory?: unknown; llm?: Partial<LlmConfig> }
     libraryRoot = typeof parsed.libraryRoot === 'string' && parsed.libraryRoot ? resolve(parsed.libraryRoot) : join(dataRoot(), 'library')
+    libraryHistory = Array.isArray(parsed.libraryHistory)
+      ? parsed.libraryHistory.filter((path): path is string => typeof path === 'string' && path.trim() !== '')
+      : []
     llmConfig = { ...DEFAULT_LLM_CONFIG, ...parsed.llm }
   } catch {
     libraryRoot = join(dataRoot(), 'library')
+    libraryHistory = []
     llmConfig = { ...DEFAULT_LLM_CONFIG }
   }
+  rememberLibraryRoot()
   await mkdir(sessionsRoot(), { recursive: true })
   await cleanupAllSessionAssets()
 }
 
 async function saveAppSettings(): Promise<void> {
   await mkdir(dataRoot(), { recursive: true })
-  await writeFile(appSettingsPath(), JSON.stringify({ libraryRoot, llm: llmConfig }, null, 2), 'utf8')
+  await writeFile(appSettingsPath(), JSON.stringify({ libraryRoot, libraryHistory, llm: llmConfig }, null, 2), 'utf8')
 }
 
 function emptySnapshot(): SessionSnapshot {
@@ -468,6 +479,7 @@ async function buildLibraryBootstrap(): Promise<LibraryBootstrap> {
 
 async function changeLibrary(nextRoot: string): Promise<LibraryBootstrap> {
   libraryRoot = resolve(nextRoot)
+  rememberLibraryRoot()
   await mkdir(sessionsRoot(), { recursive: true })
   await saveAppSettings()
   await cleanupAllSessionAssets()
@@ -1310,6 +1322,11 @@ function registerIpc(): void {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
     if (result.canceled || !result.filePaths[0]) return null
     return changeLibrary(result.filePaths[0])
+  })
+  ipcMain.handle('library:recent', (): string[] => libraryHistory.filter((path) => assetPathKey(path) !== assetPathKey(libraryRoot)))
+  ipcMain.handle('library:open', (_event, rootPath: string): Promise<LibraryBootstrap> => {
+    if (typeof rootPath !== 'string' || !rootPath.trim()) throw new Error('Invalid library folder path')
+    return changeLibrary(rootPath)
   })
   ipcMain.handle('session:create', async (_event, name: string) => {
     const session = await createSession(name)
