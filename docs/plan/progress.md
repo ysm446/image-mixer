@@ -1,7 +1,7 @@
 # 進捗
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-07 16:34
+更新日時: 2026-08-07 16:42
 
 ## 現在の状態
 
@@ -45,6 +45,7 @@ Electron + React Flowの動作版を実装済みです。Text、Image、Image Ge
 
 - `lm-graph`を参考にLocal LLM基盤を追加した。`models/`のGGUFと同じフォルダにある`mmproj`を自動検出し、`runtime/llama-server/`の実行ファイルをElectron mainからLoad・Reload・Unloadできる。
 - 上部バーのLocal LLMモデル選択をクリック式のバーへ変更し、ポップアップ一覧からモデルを選ぶとロードするようにした。ロード済みは明るい緑、アンロードは暗色、切替中はアニメーション、再ロード待ちは黄系で表示する。右端の歯車からContext length、最大出力、Temperature、アイドルアンロード、GPU layers、Flash Attention、mmproj GPU offloadを設定できる。
+- モデルバーから「LOCAL LLM」とLoaded等の副題を外し、パス部分とGGUF拡張子を除いたモデル名を等幅フォントで表示する単一行構成にした。長い名前は先頭を残して末尾を省略する。Load／Unloadはアイコンボタンへ変更し、ロード時はEjectアイコンを表示する。ComfyUIボタンも説明文を外して同じ38px高に揃えた。
 - Local LLM設定を`data/app-settings.json`へ保存し、モデル・サーバー・ログの各フォルダ表示と再スキャンに対応した。GGUFとllama-server一式はGit管理対象外とした。
 
 - キャンバスの空白部分へ画像ファイルをドロップすると、ドロップ位置へImageノードを自動作成して画像を割り当てるようにした。既存Imageノード上へのドロップは従来どおり差し替えとして扱う。

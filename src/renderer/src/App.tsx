@@ -58,6 +58,10 @@ function formatModelSize(sizeBytes: number): string {
   return `${(sizeBytes / 1024 ** 3).toFixed(1)} GB`
 }
 
+function displayModelName(name: string): string {
+  return (name.split(/[\\/]/).pop() ?? name).replace(/\.gguf$/i, '')
+}
+
 function normalizeImageDimension(value: number): number {
   if (!Number.isFinite(value)) return MIN_IMAGE_DIMENSION
   const rounded = Math.round(value / IMAGE_DIMENSION_STEP) * IMAGE_DIMENSION_STEP
@@ -2277,21 +2281,24 @@ function Editor(): React.JSX.Element {
               onClick={() => void openLlmModelPicker()}
             >
               <svg className='llm-model-icon' viewBox='0 0 24 24' aria-hidden='true'><path d='M9 3v2M15 3v2M9 19v2M15 19v2M3 9h2M3 15h2M19 9h2M19 15h2' /><rect x='5' y='5' width='14' height='14' rx='3' /><rect x='9' y='9' width='6' height='6' rx='1.5' /></svg>
-              <span className='llm-model-trigger-copy'>
-                <small>LOCAL LLM</small>
-                <strong>{llmBusy ? (llm.phase === 'unloading' ? 'Unloading…' : 'Loading…') : selectedLlmModel?.name ?? 'Select a model'}</strong>
-              </span>
-              <span className='llm-model-trigger-state'>{llmBarState === 'loaded' ? 'Loaded' : llmBarState === 'restart' ? 'Reload' : llmBarState === 'busy' ? '' : 'Unloaded'}</span>
+              <strong className='llm-model-trigger-name'>{llmBusy ? (llm.phase === 'unloading' ? 'Unloading…' : 'Loading…') : selectedLlmModel ? displayModelName(selectedLlmModel.name) : 'Select a model'}</strong>
               <svg className={`llm-model-chevron ${llmBusy ? 'spinning' : ''}`} viewBox='0 0 24 24' aria-hidden='true'>{llmBusy ? <path d='M20 12a8 8 0 1 1-2.34-5.66' /> : <path d='m7 10 5 5 5-5' />}</svg>
             </button>
             <button
               type='button'
               className={`llm-toggle status-${llm.phase}`}
               disabled={llmBusy || !llm.serverPath || !llm.config.selectedModelPath}
-              title={llm.message}
+              title={`${llmLoaded ? 'モデルをアンロード' : llm.restartRequired ? 'モデルを再ロード' : '選択中のモデルをロード'}: ${llm.message}`}
+              aria-label={llmLoaded ? 'モデルをアンロード' : llm.restartRequired ? 'モデルを再ロード' : '選択中のモデルをロード'}
               onClick={() => void toggleLlm()}
             >
-              {llm.phase === 'loading' ? 'Loading…' : llm.phase === 'unloading' ? 'Unloading…' : llm.phase === 'ready' && !llm.restartRequired ? 'Unload' : llm.restartRequired ? 'Reload' : 'Load'}
+              {llmBusy ? (
+                <svg className='llm-toggle-icon spinning' viewBox='0 0 24 24' aria-hidden='true'><path d='M20 12a8 8 0 1 1-2.34-5.66' /></svg>
+              ) : llmLoaded ? (
+                <svg className='llm-toggle-icon' viewBox='0 0 24 24' aria-hidden='true'><path d='m12 3 8 9H4l8-9Z' /><rect x='4' y='17' width='16' height='3' rx='1' /></svg>
+              ) : (
+                <svg className='llm-toggle-icon' viewBox='0 0 24 24' aria-hidden='true'><path d='M12 4v11m-4-4 4 4 4-4' /><path d='M5 19h14' /></svg>
+              )}
             </button>
           </div>
           <button
@@ -2303,7 +2310,7 @@ function Editor(): React.JSX.Element {
             onClick={() => void toggleComfyUI()}
           >
             <span className='comfy-status-dot' />
-            <div><strong>ComfyUI</strong><small>{comfy.message}</small></div>
+            <strong>ComfyUI</strong>
             <span className='comfy-toggle-label'>{comfy.phase === 'ready' ? 'Unload' : comfy.phase === 'starting' ? 'Loading…' : comfy.phase === 'stopping' ? 'Unloading…' : 'Load'}</span>
           </button>
           <button type='button' className='llm-settings-button' title='Local LLM設定' aria-label='Local LLM設定' onClick={openLlmSettings}>
