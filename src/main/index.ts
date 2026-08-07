@@ -309,7 +309,8 @@ async function duplicateSession(sessionId: string): Promise<{ session: SessionRe
   const targetDirectory = sessionDirectory(id)
   const now = new Date().toISOString()
   const session: SessionRecord = { id, name, createdAt: now, updatedAt: now }
-  const rebasedSnapshot = rebaseSnapshotAssets(parsed.snapshot ?? emptySnapshot(), sourceDirectory, targetDirectory)
+  const sourceSnapshot = healSnapshotAssetPaths(sessionId, parsed.snapshot ?? emptySnapshot()).snapshot
+  const rebasedSnapshot = rebaseSnapshotAssets(sourceSnapshot, sourceDirectory, targetDirectory)
   const snapshot = recoverInterruptedGenerations(id, rebasedSnapshot).snapshot
   try {
     await mkdir(targetDirectory, { recursive: true })
@@ -325,8 +326,9 @@ async function duplicateSession(sessionId: string): Promise<{ session: SessionRe
 
 async function readSession(sessionId: string): Promise<{ session: SessionRecord; snapshot: SessionSnapshot }> {
   const parsed = JSON.parse(await readFile(sessionFile(sessionId), 'utf8')) as { session: SessionRecord; snapshot?: SessionSnapshot }
-  const recovered = recoverInterruptedGenerations(sessionId, parsed.snapshot ?? emptySnapshot())
-  if (recovered.recovered) {
+  const healed = healSnapshotAssetPaths(sessionId, parsed.snapshot ?? emptySnapshot())
+  const recovered = recoverInterruptedGenerations(sessionId, healed.snapshot)
+  if (recovered.recovered || healed.healed) {
     await writeFile(sessionFile(sessionId), JSON.stringify({ session: parsed.session, snapshot: stripDataUrls(recovered.snapshot) }, null, 2), 'utf8')
   }
   return { session: parsed.session, snapshot: await hydrateSnapshot(recovered.snapshot) }
@@ -378,6 +380,23 @@ function resolveSessionAssetPath(sessionId: string, assetPath: string): string {
   return target
 }
 
+function healSnapshotAssetPaths(sessionId: string, snapshot: SessionSnapshot): { snapshot: SessionSnapshot; healed: boolean } {
+  const assetsDirectory = sessionAssetsDirectory(sessionId)
+  const assetsRoot = `${assetPathKey(assetsDirectory)}${sep}`
+  const clone = structuredClone(snapshot) as { nodes: Array<{ data?: { kind?: string; image?: ImageAsset | null; result?: GeneratedImage | null } }>; edges: unknown[] }
+  let healed = false
+  const heal = (asset: ImageAsset | GeneratedImage | null | undefined): void => {
+    if (!asset?.path || assetPathKey(asset.path).startsWith(assetsRoot)) return
+    asset.path = join(assetsDirectory, basename(asset.path))
+    healed = true
+  }
+  for (const node of clone.nodes) {
+    heal(node.data?.image)
+    if (node.data?.kind !== 'batch-generate') heal(node.data?.result)
+  }
+  return { snapshot: clone, healed }
+}
+
 function referencedSessionAssets(sessionId: string, snapshot: SessionSnapshot): Set<string> {
   const assetsRoot = `${assetPathKey(sessionAssetsDirectory(sessionId))}${sep}`
   const referenced = new Set<string>()
@@ -396,7 +415,8 @@ function referencedSessionAssets(sessionId: string, snapshot: SessionSnapshot): 
 
 async function cleanupUnusedSessionAssets(sessionId: string, snapshot: SessionSnapshot, saveStartedAt?: number): Promise<void> {
   const assetsDirectory = sessionAssetsDirectory(sessionId)
-  const referenced = referencedSessionAssets(sessionId, snapshot)
+  // Heal stale absolute paths first so a moved library root never marks its own assets as unused.
+  const referenced = referencedSessionAssets(sessionId, healSnapshotAssetPaths(sessionId, snapshot).snapshot)
   for (const key of referenced) pendingSessionAssets.delete(key)
 
   let entries
