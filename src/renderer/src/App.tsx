@@ -666,6 +666,11 @@ function isEditableElement(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target.isContentEditable
 }
 
+function isSupportedImageFile(file: File): boolean {
+  const extension = file.name.split('.').pop()?.toLowerCase()
+  return file.type.startsWith('image/') || /^(png|jpe?g|webp|bmp)$/.test(extension ?? '')
+}
+
 function generationJobKey(sessionId: string, nodeId: string): string {
   return `${sessionId}:${nodeId}`
 }
@@ -915,8 +920,7 @@ function Editor(): React.JSX.Element {
 
   const dropImage = useCallback(async (nodeId: string, file: File) => {
     if (!activeSession) return
-    const extension = file.name.split('.').pop()?.toLowerCase()
-    if (!file.type.startsWith('image/') && !extension?.match(/^(png|jpe?g|webp|bmp)$/)) {
+    if (!isSupportedImageFile(file)) {
       setSidebarError('画像ファイルをドロップしてください。')
       return
     }
@@ -928,6 +932,40 @@ function Editor(): React.JSX.Element {
       setSidebarError(error instanceof Error ? error.message : String(error))
     }
   }, [activeSession, updateNode])
+
+  const dragImageOverCanvas = useCallback((event: React.DragEvent): void => {
+    if (!event.dataTransfer.types.includes('Files')) return
+    if (event.target instanceof Element && event.target.closest('.react-flow__node')) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }, [])
+
+  const dropImageOnCanvas = useCallback(async (event: React.DragEvent): Promise<void> => {
+    if (event.target instanceof Element && event.target.closest('.react-flow__node')) return
+    event.preventDefault()
+    const file = event.dataTransfer.files[0]
+    if (!file || !activeSession) return
+    if (!isSupportedImageFile(file)) {
+      setSidebarError('画像ファイルをドロップしてください。')
+      return
+    }
+    const sessionId = activeSession.id
+    const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+    try {
+      const image = await window.imageMixer.importDroppedImage(file, sessionId)
+      if (activeSessionIdRef.current !== sessionId) throw new Error('セッションが切り替わりました。もう一度ドロップしてください。')
+      const title = file.name.replace(/\.[^.]+$/, '').trim() || 'Image'
+      setNodes((current) => [...current, {
+        id: `image-${crypto.randomUUID()}`,
+        type: 'editor',
+        position,
+        data: { kind: 'image', title, image }
+      }])
+      setSidebarError(null)
+    } catch (error) {
+      setSidebarError(error instanceof Error ? error.message : String(error))
+    }
+  }, [activeSession, screenToFlowPosition, setNodes])
 
   const generate = useCallback(async (nodeId: string) => {
     if (!activeSession) return
@@ -1748,6 +1786,8 @@ function Editor(): React.JSX.Element {
               isValidConnection={isValidConnection}
               onPaneContextMenu={openNodeContextMenu}
               onPaneClick={() => setNodeContextMenu(null)}
+              onDragOver={dragImageOverCanvas}
+              onDrop={(event) => void dropImageOnCanvas(event)}
               onMoveEnd={(_event, viewport) => setCanvasViewport(viewport)}
               panOnDrag={[1]}
               selectionOnDrag
