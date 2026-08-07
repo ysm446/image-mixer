@@ -1,7 +1,7 @@
 # 実装計画
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-07 15:42
+更新日時: 2026-08-07 16:00
 
 ## 基本方針
 
@@ -91,6 +91,7 @@ React Flow renderer
 - Image GenerateノードのSeed欄へランダム化ボタンを設け、有効範囲内の値を即時設定する。
 - Image Generateノードのinput / outputピン文言はノード内へ重ねず、対応するピンの外側へ配置する。
 - Image DescribeノードはImage入力をLocal LLMへ送り、編集可能な説明テキストへストリーミング出力する。出力はPrompt型としてImage GenerateとBatch Image Generateへ接続できる。下段のSystem Promptは初期状態で閉じ、空欄時は表示される既定プロンプトを使用する。
+- Text TransformノードはPrompt、Image Describe、Text Transformの出力を任意入力として受け、Instructionに従って全文を加工する。入力がなければInstructionだけから新規生成し、結果を編集可能なPrompt型テキストとしてストリーミング出力する。System Promptは折りたたみ式とし、空欄時は表示される既定値を使用する。
 
 完了条件: 再起動後もセッションのグラフと入力画像を復元できる。2026-08-05時点でJSON snapshotとセッションassetによる永続化を実装済み。
 

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import type { BatchManifest, ComfyStatus, GenerateRequest, GenerationStartedEvent, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LlmConfig, LlmStatus, SessionSnapshot, SystemResources } from '../main/types'
+import type { BatchManifest, ComfyStatus, GenerateRequest, GenerationStartedEvent, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LlmConfig, LlmStatus, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from '../main/types'
 import type { ImageMixerApi } from './bridge'
 
 const api: ImageMixerApi = {
@@ -14,6 +14,8 @@ const api: ImageMixerApi = {
   revealLlmLocation: (location) => ipcRenderer.invoke('llm:reveal', location),
   startImageDescription: (request: ImageDescribeRequest) => ipcRenderer.invoke('llm:image-describe', request),
   cancelImageDescription: (descriptionId) => ipcRenderer.invoke('llm:image-describe-cancel', descriptionId),
+  startTextTransform: (request: TextTransformRequest) => ipcRenderer.invoke('llm:text-transform', request),
+  cancelTextTransform: (transformationId) => ipcRenderer.invoke('llm:text-transform-cancel', transformationId),
   bootstrapLibrary: () => ipcRenderer.invoke('library:bootstrap'),
   chooseLibrary: () => ipcRenderer.invoke('library:choose'),
   createSession: (name) => ipcRenderer.invoke('session:create', name),
@@ -64,6 +66,21 @@ const api: ImageMixerApi = {
     const listener = (_event: IpcRendererEvent, payload: ImageDescribeErrorEvent): void => callback(payload)
     ipcRenderer.on('llm:image-describe-error', listener)
     return () => ipcRenderer.off('llm:image-describe-error', listener)
+  },
+  onTextTransformDelta: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: TextTransformStreamEvent): void => callback(payload)
+    ipcRenderer.on('llm:text-transform-delta', listener)
+    return () => ipcRenderer.off('llm:text-transform-delta', listener)
+  },
+  onTextTransformDone: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: TextTransformStreamEvent): void => callback(payload)
+    ipcRenderer.on('llm:text-transform-done', listener)
+    return () => ipcRenderer.off('llm:text-transform-done', listener)
+  },
+  onTextTransformError: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: TextTransformErrorEvent): void => callback(payload)
+    ipcRenderer.on('llm:text-transform-error', listener)
+    return () => ipcRenderer.off('llm:text-transform-error', listener)
   },
   onGenerationStarted: (callback) => {
     const listener = (_event: IpcRendererEvent, generation: GenerationStartedEvent): void => callback(generation)

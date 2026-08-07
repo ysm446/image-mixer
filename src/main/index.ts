@@ -7,8 +7,8 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import * as os from 'node:os'
 import sharp from 'sharp'
 import { DEFAULT_LLM_CONFIG, LlamaServerManager } from './llamaServer'
-import { DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT } from './types'
-import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources } from './types'
+import { DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT, DEFAULT_TEXT_TRANSFORM_SYSTEM_PROMPT } from './types'
+import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from './types'
 
 const COMFY_URL = 'http://127.0.0.1:8189'
 const COMFY_PORT = '8189'
@@ -88,6 +88,7 @@ const generationQueue: string[] = []
 let processingGenerationQueue = false
 const pendingSessionAssets = new Map<string, number>()
 const imageDescriptionControllers = new Map<string, AbortController>()
+const textTransformationControllers = new Map<string, AbortController>()
 const sessionAssetExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp'])
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -1159,6 +1160,82 @@ async function streamImageDescription(sender: Electron.WebContents, request: Ima
   }
 }
 
+async function streamTextTransformation(sender: Electron.WebContents, request: TextTransformRequest): Promise<void> {
+  const controller = new AbortController()
+  textTransformationControllers.set(request.transformationId, controller)
+  const eventBase = { transformationId: request.transformationId, sessionId: request.sessionId, nodeId: request.nodeId }
+  try {
+    const instruction = request.instruction.trim()
+    if (!instruction) throw new Error('加工指示を入力してください')
+    const runtime = getLlamaServer().getChatRuntime()
+    const sourceText = request.sourceText.trim()
+    const userMessage = sourceText
+      ? `Transformation instruction:\n<instruction>\n${instruction}\n</instruction>\n\nSource text:\n<source_text>\n${sourceText}\n</source_text>\n\nReturn the complete transformed text only.`
+      : `Transformation instruction:\n<instruction>\n${instruction}\n</instruction>\n\nThere is no source text. Create the requested text and return only the finished result.`
+    const response = await fetch(`${runtime.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'local-model',
+        stream: true,
+        temperature: runtime.temperature,
+        max_tokens: runtime.maxTokens,
+        messages: [
+          { role: 'system', content: request.systemPrompt.trim() || DEFAULT_TEXT_TRANSFORM_SYSTEM_PROMPT },
+          { role: 'user', content: userMessage }
+        ]
+      }),
+      signal: controller.signal
+    })
+    if (!response.ok || !response.body) {
+      const detail = await response.text().catch(() => '')
+      throw new Error(`Text Transformに失敗しました (${response.status})${detail ? `: ${detail}` : ''}`)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let rawContent = ''
+    const consumeLine = (line: string): void => {
+      const normalized = line.trim()
+      if (!normalized.startsWith('data:')) return
+      const data = normalized.slice(5).trim()
+      if (!data || data === '[DONE]') return
+      const parsed = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> }
+      const delta = parsed.choices?.[0]?.delta?.content ?? ''
+      if (!delta) return
+      rawContent += delta
+      const payload: TextTransformStreamEvent = { ...eventBase, content: stripThinkTags(rawContent) }
+      sender.send('llm:text-transform-delta', payload)
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() ?? ''
+      for (const line of lines) consumeLine(line)
+    }
+    buffer += decoder.decode()
+    if (buffer) consumeLine(buffer)
+    const content = stripThinkTags(rawContent).trim()
+    if (!content) throw new Error('Local LLMから変換テキストが返されませんでした')
+    const payload: TextTransformStreamEvent = { ...eventBase, content }
+    sender.send('llm:text-transform-done', payload)
+  } catch (error) {
+    const canceled = controller.signal.aborted
+    const payload: TextTransformErrorEvent = {
+      ...eventBase,
+      message: canceled ? 'Text Transform canceled' : error instanceof Error ? error.message : String(error),
+      canceled
+    }
+    sender.send('llm:text-transform-error', payload)
+  } finally {
+    textTransformationControllers.delete(request.transformationId)
+  }
+}
+
 function registerIpc(): void {
   ipcMain.handle('comfy:status', () => comfyStatus)
   ipcMain.handle('comfy:start', async (): Promise<ComfyStatus> => {
@@ -1191,6 +1268,16 @@ function registerIpc(): void {
   })
   ipcMain.handle('llm:image-describe-cancel', (_event, descriptionId: string): boolean => {
     const controller = imageDescriptionControllers.get(descriptionId)
+    if (!controller) return false
+    controller.abort()
+    return true
+  })
+  ipcMain.handle('llm:text-transform', (event, request: TextTransformRequest): void => {
+    if (textTransformationControllers.has(request.transformationId)) throw new Error('Text Transformはすでに実行中です')
+    void streamTextTransformation(event.sender, request)
+  })
+  ipcMain.handle('llm:text-transform-cancel', (_event, transformationId: string): boolean => {
+    const controller = textTransformationControllers.get(transformationId)
     if (!controller) return false
     controller.abort()
     return true
@@ -1273,6 +1360,8 @@ if (!hasSingleInstanceLock) {
     stopSystemResourcePolling()
     for (const controller of imageDescriptionControllers.values()) controller.abort()
     imageDescriptionControllers.clear()
+    for (const controller of textTransformationControllers.values()) controller.abort()
+    textTransformationControllers.clear()
     void stopComfyUI()
     void llamaServer?.stop()
   })

@@ -1,4 +1,4 @@
-import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources } from '../main/types'
+import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from '../main/types'
 
 export interface ImageMixerApi {
   getComfyStatus(): Promise<ComfyStatus>
@@ -12,6 +12,8 @@ export interface ImageMixerApi {
   revealLlmLocation(location: 'models' | 'server' | 'logs'): Promise<void>
   startImageDescription(request: ImageDescribeRequest): Promise<void>
   cancelImageDescription(descriptionId: string): Promise<boolean>
+  startTextTransform(request: TextTransformRequest): Promise<void>
+  cancelTextTransform(transformationId: string): Promise<boolean>
   bootstrapLibrary(): Promise<LibraryBootstrap>
   chooseLibrary(): Promise<LibraryBootstrap | null>
   createSession(name: string): Promise<{ session: SessionRecord; sessions: SessionRecord[]; snapshot: SessionSnapshot }>
@@ -39,6 +41,9 @@ export interface ImageMixerApi {
   onImageDescriptionDelta(callback: (event: ImageDescribeStreamEvent) => void): () => void
   onImageDescriptionDone(callback: (event: ImageDescribeStreamEvent) => void): () => void
   onImageDescriptionError(callback: (event: ImageDescribeErrorEvent) => void): () => void
+  onTextTransformDelta(callback: (event: TextTransformStreamEvent) => void): () => void
+  onTextTransformDone(callback: (event: TextTransformStreamEvent) => void): () => void
+  onTextTransformError(callback: (event: TextTransformErrorEvent) => void): () => void
   onGenerationStarted(callback: (event: GenerationStartedEvent) => void): () => void
   onSystemResources(callback: (resources: SystemResources) => void): () => void
 }

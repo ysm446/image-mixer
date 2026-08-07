@@ -1,7 +1,7 @@
 # 進捗
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-07 15:42
+更新日時: 2026-08-07 16:00
 
 ## 現在の状態
 
@@ -31,6 +31,9 @@ Electron + React Flowの動作版を実装済みです。Prompt、Image、Image 
 - ルートプロジェクトをGitリポジトリとして初期化済み。`runtime/ComfyUI`は独立したGitリポジトリとしてルート側の追跡対象から除外する。
 
 ## 完了済み
+
+- Text Transformノードを追加した。Prompt、Image Describe、Text Transformから任意でテキストを入力し、Instructionによる翻訳・修正・詳細化などの全文加工をストリーミング実行できる。
+- Text入力なしでもInstructionだけから文章や画像編集プロンプトを新規生成できる。出力は手動編集とPrompt接続に対応し、折りたたみSystem Prompt、既定値表示、経過時間、キャンセル、エラー表示、保存復元にも対応した。
 
 - Image Describeノードを追加した。ImageまたはImage Generateの画像出力を受け、Describe操作でLocal LLMの説明を編集可能なテキストエリアへストリーミング表示し、Prompt出力として画像生成ノードへ接続できる。
 - Image DescribeのSystem Promptを下段の折りたたみ領域へ追加した。初期状態は閉じ、未入力時は実際に使用する既定プロンプト全文をプレースホルダー表示して既定値として送信する。
@@ -164,7 +167,7 @@ Electron + React Flowの動作版を実装済みです。Prompt、Image、Image 
 1. 実画像3枚を使ったend-to-end生成をUIから手動確認する。
 2. 実行progress、履歴表示を追加する。
 3. セッションのexport/importを追加する。
-4. 日本語プロンプトを英語へ変換するPrompt Translateノードを設計・実装する。
+4. Local LLM処理のキュー表示と生成履歴を検討する。
 
 ## 未確定事項
 

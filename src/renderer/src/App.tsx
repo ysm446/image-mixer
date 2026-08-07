@@ -19,7 +19,7 @@ import {
   type NodeProps
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT } from '../../main/types'
+import { DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT, DEFAULT_TEXT_TRANSFORM_SYSTEM_PROMPT } from '../../main/types'
 import type { BatchFolderSelection, BatchManifest, BatchManifestItem, ComfyStatus, GeneratedImage, GenerateSettings, ImageAsset, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SessionViewport } from '../../main/types'
 import { SystemResourceMonitor } from './SystemResourceMonitor'
 
@@ -100,6 +100,19 @@ type ImageDescribeData = {
   startedAtMs?: number | null
 }
 
+type TextTransformData = {
+  kind: 'text-transform'
+  title: string
+  instruction: string
+  text: string
+  systemPrompt: string
+  systemPromptOpen: boolean
+  state: RenderState
+  error: string | null
+  durationMs?: number | null
+  startedAtMs?: number | null
+}
+
 type GenerateData = {
   kind: 'generate'
   title: string
@@ -131,7 +144,7 @@ type BatchGenerateData = {
   startedAtMs?: number | null
 }
 
-type EditorData = (PromptData | ImageData | ImageDescribeData | GenerateData | BatchGenerateData) & Record<string, unknown>
+type EditorData = (PromptData | ImageData | ImageDescribeData | TextTransformData | GenerateData | BatchGenerateData) & Record<string, unknown>
 type EditorNode = Node<EditorData, 'editor'>
 type EditorEdge = Edge
 
@@ -146,6 +159,7 @@ type NodeClipboard = {
 type EditorActions = {
   comfyReady: boolean
   llmReady: boolean
+  llmVisionReady: boolean
   hasImageInput: (nodeId: string) => boolean
   hasDescribeImageInput: (nodeId: string) => boolean
   updateNode: (nodeId: string, patch: Partial<EditorData>) => void
@@ -159,6 +173,8 @@ type EditorActions = {
   cancelGeneration: (nodeId: string) => Promise<void>
   describeImage: (nodeId: string) => Promise<void>
   cancelImageDescription: (nodeId: string) => Promise<void>
+  transformText: (nodeId: string) => Promise<void>
+  cancelTextTransform: (nodeId: string) => Promise<void>
   copyResult: (nodeId: string) => Promise<boolean>
   saveResult: (nodeId: string) => Promise<boolean>
   previewResult: (image: ImageAsset) => void
@@ -358,7 +374,7 @@ function ImageNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Ele
 }
 
 function ImageDescribeNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Element {
-  const { llmReady, hasDescribeImageInput, updateNode, describeImage, cancelImageDescription } = useEditor()
+  const { llmVisionReady, hasDescribeImageInput, updateNode, describeImage, cancelImageDescription } = useEditor()
   const describeData = data as ImageDescribeData
   const [draftText, setDraftText] = useState(describeData.text)
   const [systemPromptDraft, setSystemPromptDraft] = useState(describeData.systemPrompt)
@@ -453,10 +469,131 @@ function ImageDescribeNode({ id, data, selected }: NodeProps<EditorNode>): React
       {active ? (
         <button type='button' className='cancel-generation-button nodrag' onClick={() => void cancelImageDescription(id)}>Cancel</button>
       ) : (
-        <button type='button' className='describe-button nodrag' disabled={!llmReady || !hasImage} title={!llmReady ? 'Local LLMをロードしてください' : !hasImage ? '画像を接続してください' : '画像を説明する'} onClick={() => void describeImage(id)}>Describe</button>
+        <button type='button' className='describe-button nodrag' disabled={!llmVisionReady || !hasImage} title={!llmVisionReady ? 'Vision対応のLocal LLMをロードしてください' : !hasImage ? '画像を接続してください' : '画像を説明する'} onClick={() => void describeImage(id)}>Describe</button>
       )}
       <Handle type='source' position={Position.Right} id='prompt' className='handle prompt-handle output-handle' />
       <div className='output-label'>PROMPT</div>
+    </article>
+  )
+}
+
+function TextTransformNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Element {
+  const { llmReady, updateNode, transformText, cancelTextTransform } = useEditor()
+  const transformData = data as TextTransformData
+  const [instructionDraft, setInstructionDraft] = useState(transformData.instruction)
+  const [textDraft, setTextDraft] = useState(transformData.text)
+  const [systemPromptDraft, setSystemPromptDraft] = useState(transformData.systemPrompt)
+  const [runningDurationMs, setRunningDurationMs] = useState(0)
+  const instructionComposing = useRef(false)
+  const textComposing = useRef(false)
+  const systemPromptComposing = useRef(false)
+  const outputRef = useRef<HTMLTextAreaElement | null>(null)
+  const active = transformData.state === 'queued' || transformData.state === 'running'
+
+  useEffect(() => { if (!instructionComposing.current) setInstructionDraft(transformData.instruction) }, [transformData.instruction])
+  useEffect(() => { if (!textComposing.current) setTextDraft(transformData.text) }, [transformData.text])
+  useEffect(() => { if (!systemPromptComposing.current) setSystemPromptDraft(transformData.systemPrompt) }, [transformData.systemPrompt])
+
+  useLayoutEffect(() => {
+    const editor = outputRef.current
+    if (!editor) return
+    editor.style.height = 'auto'
+    const borderHeight = editor.offsetHeight - editor.clientHeight
+    editor.style.height = `${Math.max(180, editor.scrollHeight + borderHeight)}px`
+  }, [textDraft])
+
+  useEffect(() => {
+    if (transformData.state !== 'running' || transformData.startedAtMs == null) return
+    const updateDuration = (): void => setRunningDurationMs(Math.max(0, Date.now() - transformData.startedAtMs!))
+    updateDuration()
+    const timer = window.setInterval(updateDuration, 100)
+    return () => window.clearInterval(timer)
+  }, [transformData.startedAtMs, transformData.state])
+
+  const displayedDurationMs = transformData.state === 'running' ? runningDurationMs : transformData.durationMs
+  return (
+    <article className={`node-card text-transform-node ${selected ? 'selected' : ''}`}>
+      <div className='node-kicker'>TEXT TRANSFORM</div>
+      <EditableNodeTitle title={transformData.title} ariaLabel='Text Transform node title' onCommit={(title) => updateNode(id, { title })} />
+      <div className='transform-input-label'>Text <small>optional</small></div>
+      <Handle type='target' position={Position.Left} id='text' className='handle prompt-handle transform-text-handle' />
+
+      <label className='transform-field-label'>Instruction</label>
+      <textarea
+        className='transform-instruction-editor nodrag nopan nowheel'
+        value={instructionDraft}
+        disabled={active}
+        onChange={(event) => {
+          setInstructionDraft(event.target.value)
+          if (!instructionComposing.current) updateNode(id, { instruction: event.target.value })
+        }}
+        onCompositionStart={() => { instructionComposing.current = true }}
+        onCompositionEnd={(event) => {
+          instructionComposing.current = false
+          setInstructionDraft(event.currentTarget.value)
+          updateNode(id, { instruction: event.currentTarget.value })
+        }}
+        onKeyDown={(event) => event.stopPropagation()}
+        onKeyUp={(event) => event.stopPropagation()}
+        placeholder='例：英語の画像生成プロンプトにして'
+      />
+
+      <label className='transform-field-label transform-output-label'>Output</label>
+      <textarea
+        ref={outputRef}
+        className='prompt-editor transform-output-editor nodrag nopan nowheel'
+        value={textDraft}
+        readOnly={active}
+        onChange={(event) => {
+          setTextDraft(event.target.value)
+          if (!textComposing.current) updateNode(id, { text: event.target.value })
+        }}
+        onCompositionStart={() => { textComposing.current = true }}
+        onCompositionEnd={(event) => {
+          textComposing.current = false
+          setTextDraft(event.currentTarget.value)
+          updateNode(id, { text: event.currentTarget.value })
+        }}
+        onKeyDown={(event) => event.stopPropagation()}
+        onKeyUp={(event) => event.stopPropagation()}
+        placeholder='変換または新規生成したテキストがここへ表示されます…'
+      />
+
+      <button type='button' className='describe-system-toggle transform-system-toggle nodrag' aria-expanded={transformData.systemPromptOpen} onClick={() => updateNode(id, { systemPromptOpen: !transformData.systemPromptOpen })}>
+        <svg viewBox='0 0 16 16' aria-hidden='true'><path d={transformData.systemPromptOpen ? 'm3 6 5 5 5-5' : 'm6 3 5 5-5 5'} /></svg>
+        <span>System Prompt</span><small>{transformData.systemPrompt.trim() ? 'Custom' : 'Default'}</small>
+      </button>
+      {transformData.systemPromptOpen && (
+        <textarea
+          className='describe-system-editor transform-system-editor nodrag nopan nowheel'
+          value={systemPromptDraft}
+          disabled={active}
+          onChange={(event) => {
+            setSystemPromptDraft(event.target.value)
+            if (!systemPromptComposing.current) updateNode(id, { systemPrompt: event.target.value })
+          }}
+          onCompositionStart={() => { systemPromptComposing.current = true }}
+          onCompositionEnd={(event) => {
+            systemPromptComposing.current = false
+            setSystemPromptDraft(event.currentTarget.value)
+            updateNode(id, { systemPrompt: event.currentTarget.value })
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+          onKeyUp={(event) => event.stopPropagation()}
+          placeholder={DEFAULT_TEXT_TRANSFORM_SYSTEM_PROMPT}
+        />
+      )}
+
+      {displayedDurationMs != null && <div className='generation-duration'><span>{active ? '経過時間' : transformData.state === 'canceled' ? 'キャンセルまで' : '処理時間'}</span><strong>{formatDuration(displayedDurationMs)}</strong></div>}
+      {transformData.error && <div className='node-error'>{transformData.error}</div>}
+      {transformData.state === 'canceled' && <div className='node-canceled'>Text Transformをキャンセルしました</div>}
+      {active ? (
+        <button type='button' className='cancel-generation-button nodrag' onClick={() => void cancelTextTransform(id)}>Cancel</button>
+      ) : (
+        <button type='button' className='transform-button nodrag' disabled={!llmReady || !transformData.instruction.trim()} title={!llmReady ? 'Local LLMをロードしてください' : !transformData.instruction.trim() ? '加工指示を入力してください' : 'テキストを加工する'} onClick={() => void transformText(id)}>Transform</button>
+      )}
+      <Handle type='source' position={Position.Right} id='prompt' className='handle prompt-handle output-handle' />
+      <div className='output-label'>TEXT</div>
     </article>
   )
 }
@@ -722,6 +859,7 @@ function EditorNodeComponent(props: NodeProps<EditorNode>): React.JSX.Element {
   if (props.data.kind === 'prompt') return <PromptNode {...props} />
   if (props.data.kind === 'image') return <ImageNode {...props} />
   if (props.data.kind === 'image-describe') return <ImageDescribeNode {...props} />
+  if (props.data.kind === 'text-transform') return <TextTransformNode {...props} />
   if (props.data.kind === 'batch-generate') return <BatchGenerateNode {...props} />
   return <GenerateNode {...props} />
 }
@@ -782,6 +920,9 @@ function normalizeLoadedNodes(nodes: EditorNode[]): EditorNode[] {
     if (node.data.kind === 'image-describe' && (node.data.state === 'queued' || node.data.state === 'running')) {
       return { ...node, data: { ...node.data, state: 'canceled', error: null, startedAtMs: null } }
     }
+    if (node.data.kind === 'text-transform' && (node.data.state === 'queued' || node.data.state === 'running')) {
+      return { ...node, data: { ...node.data, state: 'canceled', error: null, startedAtMs: null } }
+    }
     if (node.data.kind === 'batch-generate' && (node.data.state === 'queued' || node.data.state === 'running')) {
       return { ...node, data: { ...node.data, state: 'canceled', currentFile: null, error: null, startedAtMs: null } }
     }
@@ -826,7 +967,7 @@ function generationJobKey(sessionId: string, nodeId: string): string {
 }
 
 function promptTextFromNode(node: EditorNode | undefined): string {
-  return node?.data.kind === 'prompt' || node?.data.kind === 'image-describe' ? node.data.text.trim() : ''
+  return node?.data.kind === 'prompt' || node?.data.kind === 'image-describe' || node?.data.kind === 'text-transform' ? node.data.text.trim() : ''
 }
 
 function Editor(): React.JSX.Element {
@@ -875,6 +1016,7 @@ function Editor(): React.JSX.Element {
   const batchCancelRequested = useRef(new Set<string>())
   const batchCurrentJobIds = useRef(new Map<string, string>())
   const imageDescriptionIds = useRef(new Map<string, string>())
+  const textTransformationIds = useRef(new Map<string, string>())
   const viewportToRestore = useRef<SessionViewport | null>(null)
   const sidebarResizingRef = useRef(false)
   const sidebarWidthRef = useRef(sidebarWidth)
@@ -1027,6 +1169,32 @@ function Editor(): React.JSX.Element {
       imageDescriptionIds.current.delete(nodeId)
       if (activeSessionIdRef.current !== sessionId) return
       setNodes((current) => current.map((node) => node.id === nodeId && node.data.kind === 'image-describe'
+        ? { ...node, data: { ...node.data, state: canceled ? 'canceled' : 'failed', error: canceled ? null : message, durationMs: node.data.startedAtMs == null ? null : Date.now() - node.data.startedAtMs, startedAtMs: null } }
+        : node))
+    })
+    return () => { removeDelta(); removeDone(); removeError() }
+  }, [setNodes])
+
+  useEffect(() => {
+    const removeDelta = window.imageMixer.onTextTransformDelta(({ transformationId, sessionId, nodeId, content }) => {
+      if (activeSessionIdRef.current !== sessionId || textTransformationIds.current.get(nodeId) !== transformationId) return
+      setNodes((current) => current.map((node) => node.id === nodeId && node.data.kind === 'text-transform'
+        ? { ...node, data: { ...node.data, text: content, state: 'running' } }
+        : node))
+    })
+    const removeDone = window.imageMixer.onTextTransformDone(({ transformationId, sessionId, nodeId, content }) => {
+      if (textTransformationIds.current.get(nodeId) !== transformationId) return
+      textTransformationIds.current.delete(nodeId)
+      if (activeSessionIdRef.current !== sessionId) return
+      setNodes((current) => current.map((node) => node.id === nodeId && node.data.kind === 'text-transform'
+        ? { ...node, data: { ...node.data, text: content, state: 'succeeded', error: null, durationMs: node.data.startedAtMs == null ? null : Date.now() - node.data.startedAtMs, startedAtMs: null } }
+        : node))
+    })
+    const removeError = window.imageMixer.onTextTransformError(({ transformationId, sessionId, nodeId, message, canceled }) => {
+      if (textTransformationIds.current.get(nodeId) !== transformationId) return
+      textTransformationIds.current.delete(nodeId)
+      if (activeSessionIdRef.current !== sessionId) return
+      setNodes((current) => current.map((node) => node.id === nodeId && node.data.kind === 'text-transform'
         ? { ...node, data: { ...node.data, state: canceled ? 'canceled' : 'failed', error: canceled ? null : message, durationMs: node.data.startedAtMs == null ? null : Date.now() - node.data.startedAtMs, startedAtMs: null } }
         : node))
     })
@@ -1195,6 +1363,49 @@ function Editor(): React.JSX.Element {
     }
   }, [updateNode])
 
+  const transformText = useCallback(async (nodeId: string): Promise<void> => {
+    if (!activeSession || llm.phase !== 'ready' || llm.restartRequired) return
+    const target = nodes.find((node) => node.id === nodeId)
+    if (!target || target.data.kind !== 'text-transform' || target.data.state === 'running') return
+    const instruction = target.data.instruction.trim()
+    if (!instruction) {
+      updateNode(nodeId, { state: 'failed', error: '加工指示を入力してください。', durationMs: null })
+      return
+    }
+    const textEdge = edges.find((edge) => edge.target === nodeId && edge.targetHandle === 'text')
+    const sourceText = promptTextFromNode(nodes.find((node) => node.id === textEdge?.source))
+    const transformationId = crypto.randomUUID()
+    const startedAtMs = Date.now()
+    textTransformationIds.current.set(nodeId, transformationId)
+    updateNode(nodeId, { text: '', state: 'running', error: null, durationMs: null, startedAtMs })
+    try {
+      await window.imageMixer.startTextTransform({
+        transformationId,
+        sessionId: activeSession.id,
+        nodeId,
+        sourceText,
+        instruction,
+        systemPrompt: target.data.systemPrompt
+      })
+    } catch (error) {
+      textTransformationIds.current.delete(nodeId)
+      updateNode(nodeId, { state: 'failed', error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAtMs, startedAtMs: null })
+    }
+  }, [activeSession, edges, llm.phase, llm.restartRequired, nodes, updateNode])
+
+  const cancelTextTransform = useCallback(async (nodeId: string): Promise<void> => {
+    const transformationId = textTransformationIds.current.get(nodeId)
+    if (!transformationId) {
+      updateNode(nodeId, { state: 'canceled', error: null, startedAtMs: null })
+      return
+    }
+    const canceled = await window.imageMixer.cancelTextTransform(transformationId)
+    if (!canceled) {
+      textTransformationIds.current.delete(nodeId)
+      updateNode(nodeId, { state: 'canceled', error: null, startedAtMs: null })
+    }
+  }, [updateNode])
+
   const chooseBatchFolder = useCallback(async (nodeId: string) => {
     try {
       const folder = await window.imageMixer.chooseBatchFolder()
@@ -1288,7 +1499,7 @@ function Editor(): React.JSX.Element {
     }
 
     if (!prompt) {
-      updateNode(nodeId, { state: 'failed', error: 'PromptまたはImage Describeノードを接続し、テキストを入力してください。', durationMs: null })
+      updateNode(nodeId, { state: 'failed', error: 'Prompt、Image Describe、またはText Transformノードを接続し、テキストを入力してください。', durationMs: null })
       return
     }
     if (hasEmptyImageConnection) {
@@ -1354,7 +1565,7 @@ function Editor(): React.JSX.Element {
     const promptNode = nodes.find((node) => node.id === promptEdge?.source)
     const prompt = promptTextFromNode(promptNode)
     if (!prompt) {
-      updateNode(nodeId, { state: 'failed', error: 'PromptまたはImage Describeノードを接続し、テキストを入力してください。' })
+      updateNode(nodeId, { state: 'failed', error: 'Prompt、Image Describe、またはText Transformノードを接続し、テキストを入力してください。' })
       return
     }
 
@@ -1624,6 +1835,11 @@ function Editor(): React.JSX.Element {
           pasted.data.error = null
           pasted.data.startedAtMs = null
         }
+        if (pasted.data.kind === 'text-transform' && (pasted.data.state === 'queued' || pasted.data.state === 'running')) {
+          pasted.data.state = 'canceled'
+          pasted.data.error = null
+          pasted.data.startedAtMs = null
+        }
         if (pasted.data.kind === 'batch-generate' && (pasted.data.state === 'queued' || pasted.data.state === 'running')) {
           pasted.data.state = 'canceled'
           pasted.data.currentFile = null
@@ -1697,9 +1913,11 @@ function Editor(): React.JSX.Element {
     if (!source || !target) return false
     if (target.data.kind === 'image-describe') {
       if (connection.targetHandle !== 'image' || (source.data.kind !== 'image' && source.data.kind !== 'generate')) return false
+    } else if (target.data.kind === 'text-transform') {
+      if (connection.targetHandle !== 'text' || (source.data.kind !== 'prompt' && source.data.kind !== 'image-describe' && source.data.kind !== 'text-transform')) return false
     } else {
       if (target.data.kind !== 'generate' && target.data.kind !== 'batch-generate') return false
-      if (connection.targetHandle === 'prompt' && source.data.kind !== 'prompt' && source.data.kind !== 'image-describe') return false
+      if (connection.targetHandle === 'prompt' && source.data.kind !== 'prompt' && source.data.kind !== 'image-describe' && source.data.kind !== 'text-transform') return false
       if (connection.targetHandle.startsWith('image') && source.data.kind !== 'image' && source.data.kind !== 'generate') return false
     }
     if (hasPath(edges, connection.target, connection.source)) return false
@@ -1761,6 +1979,18 @@ function Editor(): React.JSX.Element {
       durationMs: null,
       startedAtMs: null
     }
+    else if (kind === 'text-transform') data = {
+      kind,
+      title: 'Text Transform',
+      instruction: '',
+      text: '',
+      systemPrompt: '',
+      systemPromptOpen: false,
+      state: 'idle',
+      error: null,
+      durationMs: null,
+      startedAtMs: null
+    }
     else if (kind === 'batch-generate') data = {
       kind,
       title: 'Batch Image Generate',
@@ -1796,7 +2026,7 @@ function Editor(): React.JSX.Element {
   const openNodeContextMenu = useCallback((event: MouseEvent | React.MouseEvent<Element>) => {
     event.preventDefault()
     const menuWidth = 176
-    const menuHeight = 212
+    const menuHeight = 248
     setNodeContextMenu({
       left: Math.min(event.clientX, window.innerWidth - menuWidth - 8),
       top: Math.min(event.clientY, window.innerHeight - menuHeight - 8),
@@ -1949,7 +2179,8 @@ function Editor(): React.JSX.Element {
 
   const actions = useMemo<EditorActions>(() => ({
     comfyReady: comfy.phase === 'ready',
-    llmReady: llm.phase === 'ready' && !llm.restartRequired && Boolean(llm.models.find((model) => model.path === llm.loadedModelPath)?.mmprojPath),
+    llmReady: llm.phase === 'ready' && !llm.restartRequired,
+    llmVisionReady: llm.phase === 'ready' && !llm.restartRequired && Boolean(llm.models.find((model) => model.path === llm.loadedModelPath)?.mmprojPath),
     hasImageInput,
     hasDescribeImageInput,
     updateNode,
@@ -1963,10 +2194,12 @@ function Editor(): React.JSX.Element {
     cancelGeneration,
     describeImage,
     cancelImageDescription,
+    transformText,
+    cancelTextTransform,
     copyResult,
     saveResult,
     previewResult: setPreviewImage
-  }), [cancelBatch, cancelGeneration, cancelImageDescription, chooseBatchFolder, chooseImage, comfy.phase, copyResult, describeImage, dropImage, generate, hasDescribeImageInput, hasImageInput, llm.loadedModelPath, llm.models, llm.phase, llm.restartRequired, revealBatchOutput, runBatch, saveResult, updateNode])
+  }), [cancelBatch, cancelGeneration, cancelImageDescription, cancelTextTransform, chooseBatchFolder, chooseImage, comfy.phase, copyResult, describeImage, dropImage, generate, hasDescribeImageInput, hasImageInput, llm.loadedModelPath, llm.models, llm.phase, llm.restartRequired, revealBatchOutput, runBatch, saveResult, transformText, updateNode])
 
   const nodeTypes = useMemo(() => ({ editor: EditorNodeComponent }), [])
 
@@ -2169,6 +2402,7 @@ function Editor(): React.JSX.Element {
                   if (node.data.kind === 'prompt') return '#654398'
                   if (node.data.kind === 'image') return '#216f96'
                   if (node.data.kind === 'image-describe') return '#315f68'
+                  if (node.data.kind === 'text-transform') return '#5e4d2c'
                   if (node.data.kind === 'batch-generate') return '#247a68'
                   return '#96552f'
                 }}
@@ -2176,6 +2410,7 @@ function Editor(): React.JSX.Element {
                   if (node.data.kind === 'prompt') return '#c39cff'
                   if (node.data.kind === 'image') return '#79d3ff'
                   if (node.data.kind === 'image-describe') return '#76d3d8'
+                  if (node.data.kind === 'text-transform') return '#e0c170'
                   if (node.data.kind === 'batch-generate') return '#77e0c2'
                   return '#ffb17d'
                 }}
@@ -2203,6 +2438,7 @@ function Editor(): React.JSX.Element {
             <button type='button' onClick={() => addNodeFromContextMenu('prompt')}><span className='node-type-dot prompt' />Prompt</button>
             <button type='button' onClick={() => addNodeFromContextMenu('image')}><span className='node-type-dot image' />Image</button>
             <button type='button' onClick={() => addNodeFromContextMenu('image-describe')}><span className='node-type-dot image-describe' />Image Describe</button>
+            <button type='button' onClick={() => addNodeFromContextMenu('text-transform')}><span className='node-type-dot text-transform' />Text Transform</button>
             <button type='button' onClick={() => addNodeFromContextMenu('generate')}><span className='node-type-dot generate' />Image Generate</button>
             <button type='button' onClick={() => addNodeFromContextMenu('batch-generate')}><span className='node-type-dot batch-generate' />Batch Image Generate</button>
           </div>
