@@ -1,11 +1,19 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import type { BatchManifest, ComfyStatus, GenerateRequest, GenerationStartedEvent, SessionSnapshot, SystemResources } from '../main/types'
+import type { BatchManifest, ComfyStatus, GenerateRequest, GenerationStartedEvent, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LlmConfig, LlmStatus, SessionSnapshot, SystemResources } from '../main/types'
 import type { ImageMixerApi } from './bridge'
 
 const api: ImageMixerApi = {
   getComfyStatus: () => ipcRenderer.invoke('comfy:status'),
   startComfyUI: () => ipcRenderer.invoke('comfy:start'),
   stopComfyUI: () => ipcRenderer.invoke('comfy:stop'),
+  getLlmStatus: () => ipcRenderer.invoke('llm:status'),
+  loadLlm: () => ipcRenderer.invoke('llm:load'),
+  unloadLlm: () => ipcRenderer.invoke('llm:stop'),
+  rescanLlm: () => ipcRenderer.invoke('llm:rescan'),
+  updateLlmConfig: (patch: Partial<LlmConfig>) => ipcRenderer.invoke('llm:update-config', patch),
+  revealLlmLocation: (location) => ipcRenderer.invoke('llm:reveal', location),
+  startImageDescription: (request: ImageDescribeRequest) => ipcRenderer.invoke('llm:image-describe', request),
+  cancelImageDescription: (descriptionId) => ipcRenderer.invoke('llm:image-describe-cancel', descriptionId),
   bootstrapLibrary: () => ipcRenderer.invoke('library:bootstrap'),
   chooseLibrary: () => ipcRenderer.invoke('library:choose'),
   createSession: (name) => ipcRenderer.invoke('session:create', name),
@@ -36,6 +44,26 @@ const api: ImageMixerApi = {
     const listener = (_event: IpcRendererEvent, status: ComfyStatus): void => callback(status)
     ipcRenderer.on('comfy:status-changed', listener)
     return () => ipcRenderer.off('comfy:status-changed', listener)
+  },
+  onLlmStatus: (callback) => {
+    const listener = (_event: IpcRendererEvent, status: LlmStatus): void => callback(status)
+    ipcRenderer.on('llm:status-changed', listener)
+    return () => ipcRenderer.off('llm:status-changed', listener)
+  },
+  onImageDescriptionDelta: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: ImageDescribeStreamEvent): void => callback(payload)
+    ipcRenderer.on('llm:image-describe-delta', listener)
+    return () => ipcRenderer.off('llm:image-describe-delta', listener)
+  },
+  onImageDescriptionDone: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: ImageDescribeStreamEvent): void => callback(payload)
+    ipcRenderer.on('llm:image-describe-done', listener)
+    return () => ipcRenderer.off('llm:image-describe-done', listener)
+  },
+  onImageDescriptionError: (callback) => {
+    const listener = (_event: IpcRendererEvent, payload: ImageDescribeErrorEvent): void => callback(payload)
+    ipcRenderer.on('llm:image-describe-error', listener)
+    return () => ipcRenderer.off('llm:image-describe-error', listener)
   },
   onGenerationStarted: (callback) => {
     const listener = (_event: IpcRendererEvent, generation: GenerationStartedEvent): void => callback(generation)

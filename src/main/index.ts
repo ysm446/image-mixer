@@ -6,7 +6,9 @@ import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import * as os from 'node:os'
 import sharp from 'sharp'
-import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, LibraryBootstrap, LibraryInfo, SessionRecord, SessionSnapshot, SystemResources } from './types'
+import { DEFAULT_LLM_CONFIG, LlamaServerManager } from './llamaServer'
+import { DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT } from './types'
+import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources } from './types'
 
 const COMFY_URL = 'http://127.0.0.1:8189'
 const COMFY_PORT = '8189'
@@ -73,6 +75,8 @@ let mainWindow: BrowserWindow | null = null
 let comfyProcess: ChildProcess | null = null
 let comfyStopRequested = false
 let comfyStatus: ComfyStatus = { phase: 'stopped', message: 'ComfyUI is stopped', managed: false }
+let llamaServer: LlamaServerManager | null = null
+let llmConfig: LlmConfig = { ...DEFAULT_LLM_CONFIG }
 let isQuitting = false
 let libraryRoot = ''
 let cpuSample = sampleCpus()
@@ -83,6 +87,7 @@ const latestGenerationResultPaths = new Map<string, string>()
 const generationQueue: string[] = []
 let processingGenerationQueue = false
 const pendingSessionAssets = new Map<string, number>()
+const imageDescriptionControllers = new Map<string, AbortController>()
 const sessionAssetExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp'])
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -193,18 +198,20 @@ function resolveSessionAsset(sourcePath: string): string {
 
 async function loadLibraryRoot(): Promise<void> {
   try {
-    const parsed = JSON.parse(await readFile(appSettingsPath(), 'utf8')) as { libraryRoot?: unknown }
+    const parsed = JSON.parse(await readFile(appSettingsPath(), 'utf8')) as { libraryRoot?: unknown; llm?: Partial<LlmConfig> }
     libraryRoot = typeof parsed.libraryRoot === 'string' && parsed.libraryRoot ? resolve(parsed.libraryRoot) : join(dataRoot(), 'library')
+    llmConfig = { ...DEFAULT_LLM_CONFIG, ...parsed.llm }
   } catch {
     libraryRoot = join(dataRoot(), 'library')
+    llmConfig = { ...DEFAULT_LLM_CONFIG }
   }
   await mkdir(sessionsRoot(), { recursive: true })
   await cleanupAllSessionAssets()
 }
 
-async function saveLibraryRoot(): Promise<void> {
+async function saveAppSettings(): Promise<void> {
   await mkdir(dataRoot(), { recursive: true })
-  await writeFile(appSettingsPath(), JSON.stringify({ libraryRoot }, null, 2), 'utf8')
+  await writeFile(appSettingsPath(), JSON.stringify({ libraryRoot, llm: llmConfig }, null, 2), 'utf8')
 }
 
 function emptySnapshot(): SessionSnapshot {
@@ -461,7 +468,7 @@ async function buildLibraryBootstrap(): Promise<LibraryBootstrap> {
 async function changeLibrary(nextRoot: string): Promise<LibraryBootstrap> {
   libraryRoot = resolve(nextRoot)
   await mkdir(sessionsRoot(), { recursive: true })
-  await saveLibraryRoot()
+  await saveAppSettings()
   await cleanupAllSessionAssets()
   return buildLibraryBootstrap()
 }
@@ -645,6 +652,22 @@ function revealScreenshot(sourcePath: string): void {
 function setComfyStatus(status: ComfyStatus): void {
   comfyStatus = status
   mainWindow?.webContents.send('comfy:status-changed', status)
+}
+
+function getLlamaServer(): LlamaServerManager {
+  if (!llamaServer) throw new Error('Local LLM manager is not initialized')
+  return llamaServer
+}
+
+async function revealLlmLocation(location: 'models' | 'server' | 'logs'): Promise<void> {
+  const target = location === 'models'
+    ? join(projectRoot(), 'models')
+    : location === 'server'
+      ? join(projectRoot(), 'runtime', 'llama-server')
+      : join(dataRoot(), 'logs')
+  await mkdir(target, { recursive: true })
+  const error = await shell.openPath(target)
+  if (error) throw new Error(error)
 }
 
 async function isComfyReady(): Promise<boolean> {
@@ -1038,6 +1061,104 @@ async function cancelGeneration(sessionId: string, nodeId: string): Promise<bool
   return true
 }
 
+function resolveDescriptionImage(sessionId: string, sourcePath: string): string {
+  const sessionRoot = resolve(sessionDirectory(sessionId))
+  const target = resolveSessionAsset(sourcePath)
+  if (!target.startsWith(`${sessionRoot}${sep}`)) throw new Error('画像が現在のセッション外にあります')
+  return target
+}
+
+function stripThinkTags(value: string): string {
+  return value
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*$/gi, '')
+    .replace(/<\/think>/gi, '')
+    .trimStart()
+}
+
+async function streamImageDescription(sender: Electron.WebContents, request: ImageDescribeRequest): Promise<void> {
+  const controller = new AbortController()
+  imageDescriptionControllers.set(request.descriptionId, controller)
+  const eventBase = { descriptionId: request.descriptionId, sessionId: request.sessionId, nodeId: request.nodeId }
+  try {
+    const runtime = getLlamaServer().getChatRuntime()
+    const imagePath = resolveDescriptionImage(request.sessionId, request.imagePath)
+    const imageBytes = await sharp(imagePath)
+      .rotate()
+      .resize({ width: 1536, height: 1536, fit: 'inside', withoutEnlargement: true })
+      .png()
+      .toBuffer()
+    const dataUrl = `data:image/png;base64,${imageBytes.toString('base64')}`
+    const response = await fetch(`${runtime.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'local-model',
+        stream: true,
+        temperature: runtime.temperature,
+        max_tokens: runtime.maxTokens,
+        messages: [
+          { role: 'system', content: request.systemPrompt.trim() || DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Create an image-generation prompt that accurately describes this image.' },
+              { type: 'image_url', image_url: { url: dataUrl } }
+            ]
+          }
+        ]
+      }),
+      signal: controller.signal
+    })
+    if (!response.ok || !response.body) {
+      const detail = await response.text().catch(() => '')
+      throw new Error(`Image Describeに失敗しました (${response.status})${detail ? `: ${detail}` : ''}`)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let rawContent = ''
+    const consumeLine = (line: string): void => {
+      const normalized = line.trim()
+      if (!normalized.startsWith('data:')) return
+      const data = normalized.slice(5).trim()
+      if (!data || data === '[DONE]') return
+      const parsed = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> }
+      const delta = parsed.choices?.[0]?.delta?.content ?? ''
+      if (!delta) return
+      rawContent += delta
+      const payload: ImageDescribeStreamEvent = { ...eventBase, content: stripThinkTags(rawContent) }
+      sender.send('llm:image-describe-delta', payload)
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() ?? ''
+      for (const line of lines) consumeLine(line)
+    }
+    buffer += decoder.decode()
+    if (buffer) consumeLine(buffer)
+    const content = stripThinkTags(rawContent).trim()
+    if (!content) throw new Error('Local LLMから説明テキストが返されませんでした')
+    const payload: ImageDescribeStreamEvent = { ...eventBase, content }
+    sender.send('llm:image-describe-done', payload)
+  } catch (error) {
+    const canceled = controller.signal.aborted
+    const payload: ImageDescribeErrorEvent = {
+      ...eventBase,
+      message: canceled ? 'Image Describe canceled' : error instanceof Error ? error.message : String(error),
+      canceled
+    }
+    sender.send('llm:image-describe-error', payload)
+  } finally {
+    imageDescriptionControllers.delete(request.descriptionId)
+  }
+}
+
 function registerIpc(): void {
   ipcMain.handle('comfy:status', () => comfyStatus)
   ipcMain.handle('comfy:start', async (): Promise<ComfyStatus> => {
@@ -1047,6 +1168,32 @@ function registerIpc(): void {
   ipcMain.handle('comfy:stop', async (): Promise<ComfyStatus> => {
     await stopComfyUI()
     return comfyStatus
+  })
+  ipcMain.handle('llm:status', (): LlmStatus => getLlamaServer().getStatus())
+  ipcMain.handle('llm:load', () => getLlamaServer().load())
+  ipcMain.handle('llm:stop', () => getLlamaServer().stop())
+  ipcMain.handle('llm:rescan', (): LlmStatus => {
+    const status = getLlamaServer().rescan()
+    llmConfig = getLlamaServer().getConfig()
+    void saveAppSettings()
+    return status
+  })
+  ipcMain.handle('llm:update-config', async (_event, patch: Partial<LlmConfig>): Promise<LlmStatus> => {
+    const status = getLlamaServer().updateConfig(patch)
+    llmConfig = getLlamaServer().getConfig()
+    await saveAppSettings()
+    return status
+  })
+  ipcMain.handle('llm:reveal', (_event, location: 'models' | 'server' | 'logs') => revealLlmLocation(location))
+  ipcMain.handle('llm:image-describe', (event, request: ImageDescribeRequest): void => {
+    if (imageDescriptionControllers.has(request.descriptionId)) throw new Error('Image Describeはすでに実行中です')
+    void streamImageDescription(event.sender, request)
+  })
+  ipcMain.handle('llm:image-describe-cancel', (_event, descriptionId: string): boolean => {
+    const controller = imageDescriptionControllers.get(descriptionId)
+    if (!controller) return false
+    controller.abort()
+    return true
   })
   ipcMain.handle('library:bootstrap', () => buildLibraryBootstrap())
   ipcMain.handle('library:choose', async (): Promise<LibraryBootstrap | null> => {
@@ -1110,6 +1257,11 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     await loadLibraryRoot()
+    llamaServer = new LlamaServerManager(projectRoot(), llmConfig, (status) => {
+      mainWindow?.webContents.send('llm:status-changed', status)
+    }, join(dataRoot(), 'logs'))
+    llmConfig = llamaServer.getConfig()
+    await saveAppSettings()
     registerIpc()
     createWindow()
     startSystemResourcePolling()
@@ -1119,7 +1271,10 @@ if (!hasSingleInstanceLock) {
   app.on('before-quit', () => {
     isQuitting = true
     stopSystemResourcePolling()
+    for (const controller of imageDescriptionControllers.values()) controller.abort()
+    imageDescriptionControllers.clear()
     void stopComfyUI()
+    void llamaServer?.stop()
   })
 
   app.on('window-all-closed', () => app.quit())

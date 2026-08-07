@@ -6,6 +6,63 @@ export interface ComfyStatus {
   managed: boolean
 }
 
+export type LlmPhase = 'loading' | 'ready' | 'unloading' | 'stopped' | 'error'
+
+export const DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT = `You are an expert image captioner for image-generation workflows. Describe only what is visibly present in the image as one detailed English image-generation prompt. Include the subject, appearance, pose, composition, environment, lighting, colors, camera perspective, and visual style when they are visible. Do not invent hidden facts. Return only the prompt without headings, commentary, or quotation marks.`
+
+export interface LlmModelOption {
+  path: string
+  name: string
+  sizeBytes: number
+  mmprojPath: string | null
+}
+
+export interface LlmConfig {
+  selectedModelPath: string
+  contextLength: number
+  temperature: number
+  maxTokens: number
+  idleUnloadMinutes: number
+  gpuLayers: number
+  flashAttention: boolean
+  mmprojOffload: boolean
+}
+
+export interface LlmStatus {
+  phase: LlmPhase
+  message: string
+  managed: boolean
+  models: LlmModelOption[]
+  config: LlmConfig
+  loadedModelPath: string | null
+  serverPath: string | null
+  activePort: number | null
+  restartRequired: boolean
+}
+
+export interface ImageDescribeRequest {
+  descriptionId: string
+  sessionId: string
+  nodeId: string
+  imagePath: string
+  systemPrompt: string
+}
+
+export interface ImageDescribeStreamEvent {
+  descriptionId: string
+  sessionId: string
+  nodeId: string
+  content: string
+}
+
+export interface ImageDescribeErrorEvent {
+  descriptionId: string
+  sessionId: string
+  nodeId: string
+  message: string
+  canceled: boolean
+}
+
 export interface SystemResources {
   cpuUsage: number
   ramUsed: number

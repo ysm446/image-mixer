@@ -19,7 +19,8 @@ import {
   type NodeProps
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { BatchFolderSelection, BatchManifest, BatchManifestItem, ComfyStatus, GeneratedImage, GenerateSettings, ImageAsset, LibraryBootstrap, LibraryInfo, SessionRecord, SessionSnapshot, SessionViewport } from '../../main/types'
+import { DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT } from '../../main/types'
+import type { BatchFolderSelection, BatchManifest, BatchManifestItem, ComfyStatus, GeneratedImage, GenerateSettings, ImageAsset, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SessionViewport } from '../../main/types'
 import { SystemResourceMonitor } from './SystemResourceMonitor'
 
 type RenderState = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
@@ -31,6 +32,31 @@ const DEFAULT_SIDEBAR_WIDTH = 270
 const MIN_SIDEBAR_WIDTH = 220
 const MAX_SIDEBAR_WIDTH = 520
 const SIDEBAR_WIDTH_STORAGE_KEY = 'image-mixer.sidebar-width'
+
+const EMPTY_LLM_STATUS: LlmStatus = {
+  phase: 'stopped',
+  message: 'Local LLMを確認中…',
+  managed: false,
+  models: [],
+  config: {
+    selectedModelPath: '',
+    contextLength: 8192,
+    temperature: 0.3,
+    maxTokens: 1024,
+    idleUnloadMinutes: 0,
+    gpuLayers: 999,
+    flashAttention: true,
+    mmprojOffload: true
+  },
+  loadedModelPath: null,
+  serverPath: null,
+  activePort: null,
+  restartRequired: false
+}
+
+function formatModelSize(sizeBytes: number): string {
+  return `${(sizeBytes / 1024 ** 3).toFixed(1)} GB`
+}
 
 function normalizeImageDimension(value: number): number {
   if (!Number.isFinite(value)) return MIN_IMAGE_DIMENSION
@@ -60,6 +86,18 @@ type ImageData = {
   kind: 'image'
   title: string
   image: ImageAsset | null
+}
+
+type ImageDescribeData = {
+  kind: 'image-describe'
+  title: string
+  text: string
+  systemPrompt: string
+  systemPromptOpen: boolean
+  state: RenderState
+  error: string | null
+  durationMs?: number | null
+  startedAtMs?: number | null
 }
 
 type GenerateData = {
@@ -93,7 +131,7 @@ type BatchGenerateData = {
   startedAtMs?: number | null
 }
 
-type EditorData = (PromptData | ImageData | GenerateData | BatchGenerateData) & Record<string, unknown>
+type EditorData = (PromptData | ImageData | ImageDescribeData | GenerateData | BatchGenerateData) & Record<string, unknown>
 type EditorNode = Node<EditorData, 'editor'>
 type EditorEdge = Edge
 
@@ -107,7 +145,9 @@ type NodeClipboard = {
 
 type EditorActions = {
   comfyReady: boolean
+  llmReady: boolean
   hasImageInput: (nodeId: string) => boolean
+  hasDescribeImageInput: (nodeId: string) => boolean
   updateNode: (nodeId: string, patch: Partial<EditorData>) => void
   chooseBatchFolder: (nodeId: string) => Promise<void>
   runBatch: (nodeId: string) => Promise<void>
@@ -117,6 +157,8 @@ type EditorActions = {
   dropImage: (nodeId: string, file: File) => Promise<void>
   generate: (nodeId: string) => Promise<void>
   cancelGeneration: (nodeId: string) => Promise<void>
+  describeImage: (nodeId: string) => Promise<void>
+  cancelImageDescription: (nodeId: string) => Promise<void>
   copyResult: (nodeId: string) => Promise<boolean>
   saveResult: (nodeId: string) => Promise<boolean>
   previewResult: (image: ImageAsset) => void
@@ -311,6 +353,110 @@ function ImageNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Ele
         {hasSize && <strong>{imageData.image!.width} × {imageData.image!.height}</strong>}
       </div>
       <Handle type='source' position={Position.Right} id='image' className='handle image-handle' />
+    </article>
+  )
+}
+
+function ImageDescribeNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.Element {
+  const { llmReady, hasDescribeImageInput, updateNode, describeImage, cancelImageDescription } = useEditor()
+  const describeData = data as ImageDescribeData
+  const [draftText, setDraftText] = useState(describeData.text)
+  const [systemPromptDraft, setSystemPromptDraft] = useState(describeData.systemPrompt)
+  const [runningDurationMs, setRunningDurationMs] = useState(0)
+  const textComposing = useRef(false)
+  const systemPromptComposing = useRef(false)
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null)
+  const active = describeData.state === 'queued' || describeData.state === 'running'
+  const hasImage = hasDescribeImageInput(id)
+
+  useEffect(() => {
+    if (!textComposing.current) setDraftText(describeData.text)
+  }, [describeData.text])
+
+  useEffect(() => {
+    if (!systemPromptComposing.current) setSystemPromptDraft(describeData.systemPrompt)
+  }, [describeData.systemPrompt])
+
+  useLayoutEffect(() => {
+    const editor = textAreaRef.current
+    if (!editor) return
+    editor.style.height = 'auto'
+    const borderHeight = editor.offsetHeight - editor.clientHeight
+    editor.style.height = `${Math.max(180, editor.scrollHeight + borderHeight)}px`
+  }, [draftText])
+
+  useEffect(() => {
+    if (describeData.state !== 'running' || describeData.startedAtMs == null) return
+    const updateDuration = (): void => setRunningDurationMs(Math.max(0, Date.now() - describeData.startedAtMs!))
+    updateDuration()
+    const timer = window.setInterval(updateDuration, 100)
+    return () => window.clearInterval(timer)
+  }, [describeData.startedAtMs, describeData.state])
+
+  const displayedDurationMs = describeData.state === 'running' ? runningDurationMs : describeData.durationMs
+
+  return (
+    <article className={`node-card image-describe-node ${selected ? 'selected' : ''}`}>
+      <div className='node-kicker'>IMAGE DESCRIBE</div>
+      <EditableNodeTitle title={describeData.title} ariaLabel='Image Describe node title' onCommit={(title) => updateNode(id, { title })} />
+      <div className='describe-input-label'>Image</div>
+      <Handle type='target' position={Position.Left} id='image' className='handle image-handle describe-image-handle' />
+
+      <textarea
+        ref={textAreaRef}
+        className='prompt-editor describe-output-editor nodrag nopan nowheel'
+        value={draftText}
+        readOnly={active}
+        onChange={(event) => {
+          setDraftText(event.target.value)
+          if (!textComposing.current) updateNode(id, { text: event.target.value })
+        }}
+        onCompositionStart={() => { textComposing.current = true }}
+        onCompositionEnd={(event) => {
+          textComposing.current = false
+          setDraftText(event.currentTarget.value)
+          updateNode(id, { text: event.currentTarget.value })
+        }}
+        onKeyDown={(event) => event.stopPropagation()}
+        onKeyUp={(event) => event.stopPropagation()}
+        placeholder='画像の説明プロンプトがここへストリーミング表示されます…'
+      />
+
+      <button type='button' className='describe-system-toggle nodrag' aria-expanded={describeData.systemPromptOpen} onClick={() => updateNode(id, { systemPromptOpen: !describeData.systemPromptOpen })}>
+        <svg viewBox='0 0 16 16' aria-hidden='true'><path d={describeData.systemPromptOpen ? 'm3 6 5 5 5-5' : 'm6 3 5 5-5 5'} /></svg>
+        <span>System Prompt</span><small>{describeData.systemPrompt.trim() ? 'Custom' : 'Default'}</small>
+      </button>
+      {describeData.systemPromptOpen && (
+        <textarea
+          className='describe-system-editor nodrag nopan nowheel'
+          value={systemPromptDraft}
+          disabled={active}
+          onChange={(event) => {
+            setSystemPromptDraft(event.target.value)
+            if (!systemPromptComposing.current) updateNode(id, { systemPrompt: event.target.value })
+          }}
+          onCompositionStart={() => { systemPromptComposing.current = true }}
+          onCompositionEnd={(event) => {
+            systemPromptComposing.current = false
+            setSystemPromptDraft(event.currentTarget.value)
+            updateNode(id, { systemPrompt: event.currentTarget.value })
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+          onKeyUp={(event) => event.stopPropagation()}
+          placeholder={DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT}
+        />
+      )}
+
+      {displayedDurationMs != null && <div className='generation-duration'><span>{active ? '経過時間' : describeData.state === 'canceled' ? 'キャンセルまで' : '処理時間'}</span><strong>{formatDuration(displayedDurationMs)}</strong></div>}
+      {describeData.error && <div className='node-error'>{describeData.error}</div>}
+      {describeData.state === 'canceled' && <div className='node-canceled'>Image Describeをキャンセルしました</div>}
+      {active ? (
+        <button type='button' className='cancel-generation-button nodrag' onClick={() => void cancelImageDescription(id)}>Cancel</button>
+      ) : (
+        <button type='button' className='describe-button nodrag' disabled={!llmReady || !hasImage} title={!llmReady ? 'Local LLMをロードしてください' : !hasImage ? '画像を接続してください' : '画像を説明する'} onClick={() => void describeImage(id)}>Describe</button>
+      )}
+      <Handle type='source' position={Position.Right} id='prompt' className='handle prompt-handle output-handle' />
+      <div className='output-label'>PROMPT</div>
     </article>
   )
 }
@@ -575,6 +721,7 @@ function BatchGenerateNode({ id, data, selected }: NodeProps<EditorNode>): React
 function EditorNodeComponent(props: NodeProps<EditorNode>): React.JSX.Element {
   if (props.data.kind === 'prompt') return <PromptNode {...props} />
   if (props.data.kind === 'image') return <ImageNode {...props} />
+  if (props.data.kind === 'image-describe') return <ImageDescribeNode {...props} />
   if (props.data.kind === 'batch-generate') return <BatchGenerateNode {...props} />
   return <GenerateNode {...props} />
 }
@@ -632,6 +779,9 @@ const initialEdges: EditorEdge[] = [
 
 function normalizeLoadedNodes(nodes: EditorNode[]): EditorNode[] {
   return nodes.map((node) => {
+    if (node.data.kind === 'image-describe' && (node.data.state === 'queued' || node.data.state === 'running')) {
+      return { ...node, data: { ...node.data, state: 'canceled', error: null, startedAtMs: null } }
+    }
     if (node.data.kind === 'batch-generate' && (node.data.state === 'queued' || node.data.state === 'running')) {
       return { ...node, data: { ...node.data, state: 'canceled', currentFile: null, error: null, startedAtMs: null } }
     }
@@ -675,12 +825,21 @@ function generationJobKey(sessionId: string, nodeId: string): string {
   return `${sessionId}:${nodeId}`
 }
 
+function promptTextFromNode(node: EditorNode | undefined): string {
+  return node?.data.kind === 'prompt' || node?.data.kind === 'image-describe' ? node.data.text.trim() : ''
+}
+
 function Editor(): React.JSX.Element {
   const { fitView, getNodes, getViewport, screenToFlowPosition, setViewport } = useReactFlow()
   const [nodes, setNodes, onNodesChange] = useNodesState<EditorNode>(defaultNodes())
   const [edges, setEdges, onEdgesChange] = useEdgesState<EditorEdge>(defaultEdges())
   const [comfy, setComfy] = useState<ComfyStatus>({ phase: 'starting', message: 'Checking ComfyUI…', managed: false })
   const [comfyTogglePending, setComfyTogglePending] = useState(false)
+  const [llm, setLlm] = useState<LlmStatus>(EMPTY_LLM_STATUS)
+  const [llmTogglePending, setLlmTogglePending] = useState(false)
+  const [llmSettingsOpen, setLlmSettingsOpen] = useState(false)
+  const [llmSettingsDraft, setLlmSettingsDraft] = useState<LlmConfig>(EMPTY_LLM_STATUS.config)
+  const [llmSettingsError, setLlmSettingsError] = useState<string | null>(null)
   const [library, setLibrary] = useState<LibraryInfo | null>(null)
   const [sessions, setSessions] = useState<SessionRecord[]>([])
   const [activeSession, setActiveSession] = useState<SessionRecord | null>(null)
@@ -715,6 +874,7 @@ function Editor(): React.JSX.Element {
   const generationStartTimes = useRef(new Map<string, number>())
   const batchCancelRequested = useRef(new Set<string>())
   const batchCurrentJobIds = useRef(new Map<string, string>())
+  const imageDescriptionIds = useRef(new Map<string, string>())
   const viewportToRestore = useRef<SessionViewport | null>(null)
   const sidebarResizingRef = useRef(false)
   const sidebarWidthRef = useRef(sidebarWidth)
@@ -759,6 +919,17 @@ function Editor(): React.JSX.Element {
     return window.imageMixer.onComfyStatus(setComfy)
   }, [])
 
+  useEffect(() => {
+    void window.imageMixer.getLlmStatus().then((status) => {
+      setLlm(status)
+      setLlmSettingsDraft(status.config)
+    })
+    return window.imageMixer.onLlmStatus((status) => {
+      setLlm(status)
+      if (!llmSettingsOpen) setLlmSettingsDraft(status.config)
+    })
+  }, [llmSettingsOpen])
+
   const toggleComfyUI = useCallback(async (): Promise<void> => {
     if (comfyTogglePending || comfy.phase === 'starting' || comfy.phase === 'stopping') return
     setComfyTogglePending(true)
@@ -774,6 +945,58 @@ function Editor(): React.JSX.Element {
     }
   }, [comfy.phase, comfyTogglePending])
 
+  const selectLlmModel = useCallback(async (selectedModelPath: string): Promise<void> => {
+    try {
+      setLlmSettingsError(null)
+      setLlm(await window.imageMixer.updateLlmConfig({ selectedModelPath }))
+    } catch (error) {
+      setLlmSettingsError(error instanceof Error ? error.message : String(error))
+    }
+  }, [])
+
+  const toggleLlm = useCallback(async (): Promise<void> => {
+    if (llmTogglePending || llm.phase === 'loading' || llm.phase === 'unloading') return
+    setLlmTogglePending(true)
+    try {
+      const shouldUnload = llm.phase === 'ready' && !llm.restartRequired
+      setLlm(shouldUnload ? await window.imageMixer.unloadLlm() : await window.imageMixer.loadLlm())
+    } catch (error) {
+      setLlm((current) => ({ ...current, phase: 'error', message: error instanceof Error ? error.message : String(error) }))
+    } finally {
+      setLlmTogglePending(false)
+    }
+  }, [llm.phase, llm.restartRequired, llmTogglePending])
+
+  const openLlmSettings = useCallback((): void => {
+    setLlmSettingsDraft(llm.config)
+    setLlmSettingsError(null)
+    setLlmSettingsOpen(true)
+  }, [llm.config])
+
+  const saveLlmSettings = useCallback(async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault()
+    try {
+      setLlmSettingsError(null)
+      const status = await window.imageMixer.updateLlmConfig(llmSettingsDraft)
+      setLlm(status)
+      setLlmSettingsDraft(status.config)
+      setLlmSettingsOpen(false)
+    } catch (error) {
+      setLlmSettingsError(error instanceof Error ? error.message : String(error))
+    }
+  }, [llmSettingsDraft])
+
+  const rescanLlm = useCallback(async (): Promise<void> => {
+    try {
+      setLlmSettingsError(null)
+      const status = await window.imageMixer.rescanLlm()
+      setLlm(status)
+      setLlmSettingsDraft(status.config)
+    } catch (error) {
+      setLlmSettingsError(error instanceof Error ? error.message : String(error))
+    }
+  }, [])
+
   useEffect(() => window.imageMixer.onGenerationStarted(({ sessionId, nodeId, startedAtMs }) => {
     generationStartTimes.current.set(generationJobKey(sessionId, nodeId), startedAtMs)
     if (activeSessionIdRef.current !== sessionId) return
@@ -783,6 +1006,32 @@ function Editor(): React.JSX.Element {
         : node
     )))
   }), [setNodes])
+
+  useEffect(() => {
+    const removeDelta = window.imageMixer.onImageDescriptionDelta(({ descriptionId, sessionId, nodeId, content }) => {
+      if (activeSessionIdRef.current !== sessionId || imageDescriptionIds.current.get(nodeId) !== descriptionId) return
+      setNodes((current) => current.map((node) => node.id === nodeId && node.data.kind === 'image-describe'
+        ? { ...node, data: { ...node.data, text: content, state: 'running' } }
+        : node))
+    })
+    const removeDone = window.imageMixer.onImageDescriptionDone(({ descriptionId, sessionId, nodeId, content }) => {
+      if (imageDescriptionIds.current.get(nodeId) !== descriptionId) return
+      imageDescriptionIds.current.delete(nodeId)
+      if (activeSessionIdRef.current !== sessionId) return
+      setNodes((current) => current.map((node) => node.id === nodeId && node.data.kind === 'image-describe'
+        ? { ...node, data: { ...node.data, text: content, state: 'succeeded', error: null, durationMs: node.data.startedAtMs == null ? null : Date.now() - node.data.startedAtMs, startedAtMs: null } }
+        : node))
+    })
+    const removeError = window.imageMixer.onImageDescriptionError(({ descriptionId, sessionId, nodeId, message, canceled }) => {
+      if (imageDescriptionIds.current.get(nodeId) !== descriptionId) return
+      imageDescriptionIds.current.delete(nodeId)
+      if (activeSessionIdRef.current !== sessionId) return
+      setNodes((current) => current.map((node) => node.id === nodeId && node.data.kind === 'image-describe'
+        ? { ...node, data: { ...node.data, state: canceled ? 'canceled' : 'failed', error: canceled ? null : message, durationMs: node.data.startedAtMs == null ? null : Date.now() - node.data.startedAtMs, startedAtMs: null } }
+        : node))
+    })
+    return () => { removeDelta(); removeDone(); removeError() }
+  }, [setNodes])
 
   useEffect(() => {
     const closeMenus = (): void => {
@@ -903,6 +1152,49 @@ function Editor(): React.JSX.Element {
     setNodes((current) => current.map((node) => node.id === nodeId ? { ...node, data: { ...node.data, ...patch } as EditorData } : node))
   }, [setNodes])
 
+  const describeImage = useCallback(async (nodeId: string): Promise<void> => {
+    if (!activeSession || llm.phase !== 'ready' || llm.restartRequired) return
+    const target = nodes.find((node) => node.id === nodeId)
+    if (!target || target.data.kind !== 'image-describe' || target.data.state === 'running') return
+    const imageEdge = edges.find((edge) => edge.target === nodeId && edge.targetHandle === 'image')
+    const source = nodes.find((node) => node.id === imageEdge?.source)
+    const imagePath = source?.data.kind === 'image' ? source.data.image?.path : source?.data.kind === 'generate' ? source.data.result?.path : null
+    if (!imagePath) {
+      updateNode(nodeId, { state: 'failed', error: '画像が読み込まれたImageノード、または生成結果を接続してください。', durationMs: null })
+      return
+    }
+
+    const descriptionId = crypto.randomUUID()
+    const startedAtMs = Date.now()
+    imageDescriptionIds.current.set(nodeId, descriptionId)
+    updateNode(nodeId, { text: '', state: 'running', error: null, durationMs: null, startedAtMs })
+    try {
+      await window.imageMixer.startImageDescription({
+        descriptionId,
+        sessionId: activeSession.id,
+        nodeId,
+        imagePath,
+        systemPrompt: target.data.systemPrompt
+      })
+    } catch (error) {
+      imageDescriptionIds.current.delete(nodeId)
+      updateNode(nodeId, { state: 'failed', error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAtMs, startedAtMs: null })
+    }
+  }, [activeSession, edges, llm.phase, llm.restartRequired, nodes, updateNode])
+
+  const cancelImageDescription = useCallback(async (nodeId: string): Promise<void> => {
+    const descriptionId = imageDescriptionIds.current.get(nodeId)
+    if (!descriptionId) {
+      updateNode(nodeId, { state: 'canceled', error: null, startedAtMs: null })
+      return
+    }
+    const canceled = await window.imageMixer.cancelImageDescription(descriptionId)
+    if (!canceled) {
+      imageDescriptionIds.current.delete(nodeId)
+      updateNode(nodeId, { state: 'canceled', error: null, startedAtMs: null })
+    }
+  }, [updateNode])
+
   const chooseBatchFolder = useCallback(async (nodeId: string) => {
     try {
       const folder = await window.imageMixer.chooseBatchFolder()
@@ -974,7 +1266,7 @@ function Editor(): React.JSX.Element {
     if (!target || target.data.kind !== 'generate' || target.data.state === 'queued' || target.data.state === 'running') return
     const promptEdge = edges.find((edge) => edge.target === nodeId && edge.targetHandle === 'prompt')
     const promptNode = nodes.find((node) => node.id === promptEdge?.source)
-    const prompt = promptNode?.data.kind === 'prompt' ? promptNode.data.text.trim() : ''
+    const prompt = promptTextFromNode(promptNode)
     const imagePaths: Array<string | null> = []
     const imageSourceNodeIds: Array<string | null> = []
     let hasEmptyImageConnection = false
@@ -996,7 +1288,7 @@ function Editor(): React.JSX.Element {
     }
 
     if (!prompt) {
-      updateNode(nodeId, { state: 'failed', error: 'Promptノードを接続し、テキストを入力してください。', durationMs: null })
+      updateNode(nodeId, { state: 'failed', error: 'PromptまたはImage Describeノードを接続し、テキストを入力してください。', durationMs: null })
       return
     }
     if (hasEmptyImageConnection) {
@@ -1060,9 +1352,9 @@ function Editor(): React.JSX.Element {
     if (!target || target.data.kind !== 'batch-generate' || !target.data.folder || target.data.state === 'running') return
     const promptEdge = edges.find((edge) => edge.target === nodeId && edge.targetHandle === 'prompt')
     const promptNode = nodes.find((node) => node.id === promptEdge?.source)
-    const prompt = promptNode?.data.kind === 'prompt' ? promptNode.data.text.trim() : ''
+    const prompt = promptTextFromNode(promptNode)
     if (!prompt) {
-      updateNode(nodeId, { state: 'failed', error: 'Promptノードを接続し、テキストを入力してください。' })
+      updateNode(nodeId, { state: 'failed', error: 'PromptまたはImage Describeノードを接続し、テキストを入力してください。' })
       return
     }
 
@@ -1327,6 +1619,11 @@ function Editor(): React.JSX.Element {
           pasted.data.error = null
           pasted.data.startedAtMs = null
         }
+        if (pasted.data.kind === 'image-describe' && (pasted.data.state === 'queued' || pasted.data.state === 'running')) {
+          pasted.data.state = 'canceled'
+          pasted.data.error = null
+          pasted.data.startedAtMs = null
+        }
         if (pasted.data.kind === 'batch-generate' && (pasted.data.state === 'queued' || pasted.data.state === 'running')) {
           pasted.data.state = 'canceled'
           pasted.data.currentFile = null
@@ -1397,9 +1694,14 @@ function Editor(): React.JSX.Element {
     if (!connection.source || !connection.target || !connection.targetHandle || connection.source === connection.target) return false
     const source = nodes.find((node) => node.id === connection.source)
     const target = nodes.find((node) => node.id === connection.target)
-    if (!source || !target || (target.data.kind !== 'generate' && target.data.kind !== 'batch-generate')) return false
-    if (connection.targetHandle === 'prompt' && source.data.kind !== 'prompt') return false
-    if (connection.targetHandle.startsWith('image') && source.data.kind !== 'image' && source.data.kind !== 'generate') return false
+    if (!source || !target) return false
+    if (target.data.kind === 'image-describe') {
+      if (connection.targetHandle !== 'image' || (source.data.kind !== 'image' && source.data.kind !== 'generate')) return false
+    } else {
+      if (target.data.kind !== 'generate' && target.data.kind !== 'batch-generate') return false
+      if (connection.targetHandle === 'prompt' && source.data.kind !== 'prompt' && source.data.kind !== 'image-describe') return false
+      if (connection.targetHandle.startsWith('image') && source.data.kind !== 'image' && source.data.kind !== 'generate') return false
+    }
     if (hasPath(edges, connection.target, connection.source)) return false
     return true
   }, [edges, nodes])
@@ -1436,12 +1738,29 @@ function Editor(): React.JSX.Element {
     edges.some((edge) => edge.target === nodeId && edge.targetHandle?.startsWith('image'))
   ), [edges])
 
+  const hasDescribeImageInput = useCallback((nodeId: string): boolean => {
+    const edge = edges.find((candidate) => candidate.target === nodeId && candidate.targetHandle === 'image')
+    const source = nodes.find((node) => node.id === edge?.source)
+    return Boolean(source?.data.kind === 'image' ? source.data.image : source?.data.kind === 'generate' ? source.data.result : null)
+  }, [edges, nodes])
+
   const addNode = useCallback((kind: EditorData['kind'], requestedPosition?: { x: number; y: number }) => {
     const id = `${kind}-${crypto.randomUUID()}`
     const position = requestedPosition ?? { x: 220 + Math.random() * 380, y: 120 + Math.random() * 360 }
     let data: EditorData
     if (kind === 'prompt') data = { kind, title: 'Prompt', text: '' }
     else if (kind === 'image') data = { kind, title: 'Image', image: null }
+    else if (kind === 'image-describe') data = {
+      kind,
+      title: 'Image Describe',
+      text: '',
+      systemPrompt: '',
+      systemPromptOpen: false,
+      state: 'idle',
+      error: null,
+      durationMs: null,
+      startedAtMs: null
+    }
     else if (kind === 'batch-generate') data = {
       kind,
       title: 'Batch Image Generate',
@@ -1477,7 +1796,7 @@ function Editor(): React.JSX.Element {
   const openNodeContextMenu = useCallback((event: MouseEvent | React.MouseEvent<Element>) => {
     event.preventDefault()
     const menuWidth = 176
-    const menuHeight = 176
+    const menuHeight = 212
     setNodeContextMenu({
       left: Math.min(event.clientX, window.innerWidth - menuWidth - 8),
       top: Math.min(event.clientY, window.innerHeight - menuHeight - 8),
@@ -1630,7 +1949,9 @@ function Editor(): React.JSX.Element {
 
   const actions = useMemo<EditorActions>(() => ({
     comfyReady: comfy.phase === 'ready',
+    llmReady: llm.phase === 'ready' && !llm.restartRequired && Boolean(llm.models.find((model) => model.path === llm.loadedModelPath)?.mmprojPath),
     hasImageInput,
+    hasDescribeImageInput,
     updateNode,
     chooseBatchFolder,
     runBatch,
@@ -1640,10 +1961,12 @@ function Editor(): React.JSX.Element {
     dropImage,
     generate,
     cancelGeneration,
+    describeImage,
+    cancelImageDescription,
     copyResult,
     saveResult,
     previewResult: setPreviewImage
-  }), [cancelBatch, cancelGeneration, chooseBatchFolder, chooseImage, comfy.phase, copyResult, dropImage, generate, hasImageInput, revealBatchOutput, runBatch, saveResult, updateNode])
+  }), [cancelBatch, cancelGeneration, cancelImageDescription, chooseBatchFolder, chooseImage, comfy.phase, copyResult, describeImage, dropImage, generate, hasDescribeImageInput, hasImageInput, llm.loadedModelPath, llm.models, llm.phase, llm.restartRequired, revealBatchOutput, runBatch, saveResult, updateNode])
 
   const nodeTypes = useMemo(() => ({ editor: EditorNodeComponent }), [])
 
@@ -1651,6 +1974,34 @@ function Editor(): React.JSX.Element {
     <EditorContext.Provider value={actions}>
       <main className='app-shell'>
         <header className='topbar'>
+          <div className='llm-model-control'>
+            <span className={`llm-status-dot status-${llm.phase}`} aria-hidden='true' />
+            <label htmlFor='llm-model-select'>Local LLM</label>
+            <select
+              id='llm-model-select'
+              value={llm.config.selectedModelPath}
+              disabled={llm.phase === 'loading' || llm.phase === 'unloading' || llm.models.length === 0}
+              title={llm.message}
+              onChange={(event) => void selectLlmModel(event.target.value)}
+            >
+              {llm.models.length === 0 && <option value=''>GGUFモデルがありません</option>}
+              {llm.models.map((model) => (
+                <option key={model.path} value={model.path}>
+                  {model.name} ({formatModelSize(model.sizeBytes)}){model.mmprojPath ? ' · Vision' : ''}
+                </option>
+              ))}
+            </select>
+            <button
+              type='button'
+              className={`llm-toggle status-${llm.phase}`}
+              disabled={llmTogglePending || llm.phase === 'loading' || llm.phase === 'unloading' || !llm.serverPath || !llm.config.selectedModelPath}
+              title={llm.message}
+              onClick={() => void toggleLlm()}
+            >
+              {llm.phase === 'loading' ? 'Loading…' : llm.phase === 'unloading' ? 'Unloading…' : llm.phase === 'ready' && !llm.restartRequired ? 'Unload' : llm.restartRequired ? 'Reload' : 'Load'}
+            </button>
+            <small className='llm-model-message' title={llm.message}>{llm.message}</small>
+          </div>
           <button
             type='button'
             className={'comfy-status status-' + comfy.phase}
@@ -1662,6 +2013,9 @@ function Editor(): React.JSX.Element {
             <span className='comfy-status-dot' />
             <div><strong>ComfyUI</strong><small>{comfy.message}</small></div>
             <span className='comfy-toggle-label'>{comfy.phase === 'ready' ? 'Unload' : comfy.phase === 'starting' ? 'Loading…' : comfy.phase === 'stopping' ? 'Unloading…' : 'Load'}</span>
+          </button>
+          <button type='button' className='llm-settings-button' title='Local LLM設定' aria-label='Local LLM設定' onClick={openLlmSettings}>
+            <svg viewBox='0 0 24 24' aria-hidden='true'><path d='M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z' /><path d='M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3.01V3h4v.08a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1.03H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z' /></svg>
           </button>
         </header>
         <div className='workspace' style={{ gridTemplateColumns: sidebarWidth + 'px 0 minmax(0, 1fr)' }}>
@@ -1814,12 +2168,14 @@ function Editor(): React.JSX.Element {
                 nodeColor={(node) => {
                   if (node.data.kind === 'prompt') return '#654398'
                   if (node.data.kind === 'image') return '#216f96'
+                  if (node.data.kind === 'image-describe') return '#315f68'
                   if (node.data.kind === 'batch-generate') return '#247a68'
                   return '#96552f'
                 }}
                 nodeStrokeColor={(node) => {
                   if (node.data.kind === 'prompt') return '#c39cff'
                   if (node.data.kind === 'image') return '#79d3ff'
+                  if (node.data.kind === 'image-describe') return '#76d3d8'
                   if (node.data.kind === 'batch-generate') return '#77e0c2'
                   return '#ffb17d'
                 }}
@@ -1846,6 +2202,7 @@ function Editor(): React.JSX.Element {
             <div className='node-context-title'>ADD NODE</div>
             <button type='button' onClick={() => addNodeFromContextMenu('prompt')}><span className='node-type-dot prompt' />Prompt</button>
             <button type='button' onClick={() => addNodeFromContextMenu('image')}><span className='node-type-dot image' />Image</button>
+            <button type='button' onClick={() => addNodeFromContextMenu('image-describe')}><span className='node-type-dot image-describe' />Image Describe</button>
             <button type='button' onClick={() => addNodeFromContextMenu('generate')}><span className='node-type-dot generate' />Image Generate</button>
             <button type='button' onClick={() => addNodeFromContextMenu('batch-generate')}><span className='node-type-dot batch-generate' />Batch Image Generate</button>
           </div>
@@ -1861,6 +2218,60 @@ function Editor(): React.JSX.Element {
               </span>
             </button>
             <button type='button' className='screenshot-toast-close' aria-label='通知を閉じる' onClick={() => setScreenshotNotice(null)}>×</button>
+          </div>
+        )}
+        {llmSettingsOpen && (
+          <div className='llm-settings-backdrop' onPointerDown={() => setLlmSettingsOpen(false)}>
+            <form className='llm-settings-dialog' onSubmit={(event) => void saveLlmSettings(event)} onPointerDown={(event) => event.stopPropagation()}>
+              <header>
+                <div><span>LOCAL LLM</span><h2>モデルとサーバー設定</h2></div>
+                <button type='button' className='llm-dialog-close' aria-label='閉じる' onClick={() => setLlmSettingsOpen(false)}>×</button>
+              </header>
+
+              <section className='llm-settings-section'>
+                <div className='llm-settings-section-title'>モデル</div>
+                <label className='llm-settings-field llm-settings-wide'>
+                  <span>使用モデル</span>
+                  <select value={llmSettingsDraft.selectedModelPath} onChange={(event) => setLlmSettingsDraft((current) => ({ ...current, selectedModelPath: event.target.value }))}>
+                    {llm.models.length === 0 && <option value=''>GGUFモデルがありません</option>}
+                    {llm.models.map((model) => <option key={model.path} value={model.path}>{model.name} ({formatModelSize(model.sizeBytes)})</option>)}
+                  </select>
+                </label>
+                <div className='llm-path-summary llm-settings-wide'>
+                  <span className={llm.serverPath ? 'available' : 'missing'}>{llm.serverPath ? 'llama-server 検出済み' : 'llama-server が見つかりません'}</span>
+                  <span>{llm.models.find((model) => model.path === llmSettingsDraft.selectedModelPath)?.mmprojPath ? 'Vision projector 検出済み' : 'Vision projector なし'}</span>
+                </div>
+                <div className='llm-folder-actions llm-settings-wide'>
+                  <button type='button' onClick={() => void window.imageMixer.revealLlmLocation('models')}>Modelsフォルダ</button>
+                  <button type='button' onClick={() => void window.imageMixer.revealLlmLocation('server')}>Serverフォルダ</button>
+                  <button type='button' onClick={() => void window.imageMixer.revealLlmLocation('logs')}>ログ</button>
+                  <button type='button' onClick={() => void rescanLlm()}>再スキャン</button>
+                </div>
+              </section>
+
+              <section className='llm-settings-section llm-settings-grid'>
+                <div className='llm-settings-section-title llm-settings-wide'>生成設定</div>
+                <label className='llm-settings-field'><span>Context length</span><input type='number' min={512} max={262144} step={512} value={llmSettingsDraft.contextLength} onChange={(event) => setLlmSettingsDraft((current) => ({ ...current, contextLength: Number(event.target.value) }))} /></label>
+                <label className='llm-settings-field'><span>Max output tokens</span><input type='number' min={1} max={32768} step={1} value={llmSettingsDraft.maxTokens} onChange={(event) => setLlmSettingsDraft((current) => ({ ...current, maxTokens: Number(event.target.value) }))} /></label>
+                <label className='llm-settings-field'><span>Temperature</span><input type='number' min={0} max={2} step={0.05} value={llmSettingsDraft.temperature} onChange={(event) => setLlmSettingsDraft((current) => ({ ...current, temperature: Number(event.target.value) }))} /></label>
+                <label className='llm-settings-field'><span>Idle unload（分、0で無効）</span><input type='number' min={0} max={1440} step={1} value={llmSettingsDraft.idleUnloadMinutes} onChange={(event) => setLlmSettingsDraft((current) => ({ ...current, idleUnloadMinutes: Number(event.target.value) }))} /></label>
+              </section>
+
+              <section className='llm-settings-section llm-settings-grid'>
+                <div className='llm-settings-section-title llm-settings-wide'>詳細設定</div>
+                <label className='llm-settings-field'><span>GPU layers</span><input type='number' min={0} max={999} step={1} value={llmSettingsDraft.gpuLayers} onChange={(event) => setLlmSettingsDraft((current) => ({ ...current, gpuLayers: Number(event.target.value) }))} /></label>
+                <div className='llm-setting-toggles'>
+                  <label><input type='checkbox' checked={llmSettingsDraft.flashAttention} onChange={(event) => setLlmSettingsDraft((current) => ({ ...current, flashAttention: event.target.checked }))} /><span>Flash Attention</span></label>
+                  <label><input type='checkbox' checked={llmSettingsDraft.mmprojOffload} onChange={(event) => setLlmSettingsDraft((current) => ({ ...current, mmprojOffload: event.target.checked }))} /><span>mmproj GPU offload</span></label>
+                </div>
+              </section>
+
+              {llmSettingsError && <div className='llm-settings-error'>{llmSettingsError}</div>}
+              <footer>
+                <span>{llm.activePort ? `127.0.0.1:${llm.activePort}` : llm.message}</span>
+                <div><button type='button' onClick={() => setLlmSettingsOpen(false)}>キャンセル</button><button type='submit' className='primary'>保存</button></div>
+              </footer>
+            </form>
           </div>
         )}
         {previewImage && (

@@ -1,9 +1,17 @@
-import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, LibraryBootstrap, SessionRecord, SessionSnapshot, SystemResources } from '../main/types'
+import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources } from '../main/types'
 
 export interface ImageMixerApi {
   getComfyStatus(): Promise<ComfyStatus>
   startComfyUI(): Promise<ComfyStatus>
   stopComfyUI(): Promise<ComfyStatus>
+  getLlmStatus(): Promise<LlmStatus>
+  loadLlm(): Promise<LlmStatus>
+  unloadLlm(): Promise<LlmStatus>
+  rescanLlm(): Promise<LlmStatus>
+  updateLlmConfig(patch: Partial<LlmConfig>): Promise<LlmStatus>
+  revealLlmLocation(location: 'models' | 'server' | 'logs'): Promise<void>
+  startImageDescription(request: ImageDescribeRequest): Promise<void>
+  cancelImageDescription(descriptionId: string): Promise<boolean>
   bootstrapLibrary(): Promise<LibraryBootstrap>
   chooseLibrary(): Promise<LibraryBootstrap | null>
   createSession(name: string): Promise<{ session: SessionRecord; sessions: SessionRecord[]; snapshot: SessionSnapshot }>
@@ -27,6 +35,10 @@ export interface ImageMixerApi {
   captureScreenshot(): Promise<string>
   revealScreenshot(sourcePath: string): Promise<void>
   onComfyStatus(callback: (status: ComfyStatus) => void): () => void
+  onLlmStatus(callback: (status: LlmStatus) => void): () => void
+  onImageDescriptionDelta(callback: (event: ImageDescribeStreamEvent) => void): () => void
+  onImageDescriptionDone(callback: (event: ImageDescribeStreamEvent) => void): () => void
+  onImageDescriptionError(callback: (event: ImageDescribeErrorEvent) => void): () => void
   onGenerationStarted(callback: (event: GenerationStartedEvent) => void): () => void
   onSystemResources(callback: (resources: SystemResources) => void): () => void
 }

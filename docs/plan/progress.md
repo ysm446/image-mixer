@@ -1,7 +1,7 @@
 # 進捗
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-07 14:59
+更新日時: 2026-08-07 15:42
 
 ## 現在の状態
 
@@ -31,6 +31,14 @@ Electron + React Flowの動作版を実装済みです。Prompt、Image、Image 
 - ルートプロジェクトをGitリポジトリとして初期化済み。`runtime/ComfyUI`は独立したGitリポジトリとしてルート側の追跡対象から除外する。
 
 ## 完了済み
+
+- Image Describeノードを追加した。ImageまたはImage Generateの画像出力を受け、Describe操作でLocal LLMの説明を編集可能なテキストエリアへストリーミング表示し、Prompt出力として画像生成ノードへ接続できる。
+- Image DescribeのSystem Promptを下段の折りたたみ領域へ追加した。初期状態は閉じ、未入力時は実際に使用する既定プロンプト全文をプレースホルダー表示して既定値として送信する。
+- Image Describeの実行時間、失敗、キャンセル、セッション保存、コピー時の実行状態修復に対応した。WebP・BMPを含む入力画像はLLM送信前に長辺1536px以内のPNGへ正規化する。
+
+- `lm-graph`を参考にLocal LLM基盤を追加した。`models/`のGGUFと同じフォルダにある`mmproj`を自動検出し、`runtime/llama-server/`の実行ファイルをElectron mainからLoad・Reload・Unloadできる。
+- 上部バーへLocal LLMモデル選択、状態、Load操作を追加し、右端の歯車からContext length、最大出力、Temperature、アイドルアンロード、GPU layers、Flash Attention、mmproj GPU offloadを設定できるようにした。
+- Local LLM設定を`data/app-settings.json`へ保存し、モデル・サーバー・ログの各フォルダ表示と再スキャンに対応した。GGUFとllama-server一式はGit管理対象外とした。
 
 - キャンバスの空白部分へ画像ファイルをドロップすると、ドロップ位置へImageノードを自動作成して画像を割り当てるようにした。既存Imageノード上へのドロップは従来どおり差し替えとして扱う。
 
@@ -156,7 +164,7 @@ Electron + React Flowの動作版を実装済みです。Prompt、Image、Image 
 1. 実画像3枚を使ったend-to-end生成をUIから手動確認する。
 2. 実行progress、履歴表示を追加する。
 3. セッションのexport/importを追加する。
-4. ローカルLLMによるPromptノード執筆支援を設計・実装する。
+4. 日本語プロンプトを英語へ変換するPrompt Translateノードを設計・実装する。
 
 ## 未確定事項
 

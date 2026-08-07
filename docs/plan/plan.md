@@ -1,13 +1,14 @@
 # 実装計画
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-07 14:59
+更新日時: 2026-08-07 15:42
 
 ## 基本方針
 
 - UI は [ysm446/lm-graph](https://github.com/ysm446/lm-graph) を参考に Electron + React + TypeScript + React Flow で構築する。
 - renderer からローカルファイルや ComfyUI へ直接アクセスせず、preload の型付き IPC を介して Electron main に処理を集約する。
 - Electron main が ComfyUI プロセス、HTTP API、WebSocket、画像ファイル、プロジェクト DB を管理する。
+- Local LLMは`models/`のGGUFと同じフォルダの`mmproj`を検出し、Electron mainが`runtime/llama-server/`のプロセスを管理する。
 - Electronのsingle-instance lockを使い、アプリとComfyUIの管理主体が二重にならないようにする。2回目の起動要求では既存ウィンドウを前面表示する。
 - Python はリポジトリ直下の `.venv/` を使用し、`runtime/ComfyUI/main.py` を同環境から起動する。MVP では独自の常駐 Python API サーバーを増やさない。
 - 現在のMVPでは、選択したルートフォルダの `sessions/<session-id>/session.json` にグラフを保存し、画像本体は同セッションの `assets/` にコピーする。SQLiteへの移行は履歴・検索要件が増えた段階で再検討する。
@@ -35,6 +36,8 @@ React Flow renderer
       └─ Electron main
           ├─ SQLite / data/assets
           ├─ ComfyUI process manager
+          ├─ llama-server process manager
+          │      └─ models/*.gguf + mmproj*.gguf
           └─ ComfyUI HTTP + WebSocket client
                  └─ runtime/ComfyUI (Python .venv)
                       └─ Qwen-Rapid-AIO-NSFW-v23.safetensors
@@ -72,7 +75,7 @@ React Flow renderer
 - 各ノードのタイトルは通常時に表示専用とし、横の編集アイコンから入力欄へ切り替えて変更する。
 - 型付きハンドル、最大入力数、自己接続・サイクル防止を実装する。
 - キャンバスの右クリック位置へPrompt / Image / Image Generateノードを追加できるコンテキストメニューを実装する。
-- ノード追加操作はキャンバスの右クリックメニューへ一本化し、上部バーには右端のComfyUI状態だけを表示する。アプリ名や説明文、新規作成ボタンは置かない。
+- ノード追加操作はキャンバスの右クリックメニューへ一本化する。上部バーにはLocal LLMのモデル選択・Load操作、ComfyUI状態、Local LLM設定ボタンを置き、アプリ名や説明文、新規作成ボタンは置かない。
 - 左ドラッグの部分一致範囲選択、複数ノード移動、`F` / `A`のfit viewショートカットを実装する。
 - セッションごとのキャンバス位置とズームをsnapshotへ保存し、切り替え・再起動時に復元する。
 - `Ctrl+C` / `Ctrl+V`で選択ノードと選択集合内のエッジを新しいIDへ複製する。別セッションへ貼り付ける場合は、参照画像と生成結果を貼り付け先セッションの`assets/`へ独立コピーしてパスを付け替える。
@@ -87,6 +90,7 @@ React Flow renderer
 - Image Generateノードの結果画像をクリックすると画面内へ拡大し、背景クリックまたはEscapeで閉じるプレビューを提供する。
 - Image GenerateノードのSeed欄へランダム化ボタンを設け、有効範囲内の値を即時設定する。
 - Image Generateノードのinput / outputピン文言はノード内へ重ねず、対応するピンの外側へ配置する。
+- Image DescribeノードはImage入力をLocal LLMへ送り、編集可能な説明テキストへストリーミング出力する。出力はPrompt型としてImage GenerateとBatch Image Generateへ接続できる。下段のSystem Promptは初期状態で閉じ、空欄時は表示される既定プロンプトを使用する。
 
 完了条件: 再起動後もセッションのグラフと入力画像を復元できる。2026-08-05時点でJSON snapshotとセッションassetによる永続化を実装済み。
 
