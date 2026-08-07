@@ -34,6 +34,8 @@ const MAX_SIDEBAR_WIDTH = 520
 const SIDEBAR_WIDTH_STORAGE_KEY = 'image-mixer.sidebar-width'
 const SIDEBAR_VISIBLE_STORAGE_KEY = 'image-mixer.sidebar-visible'
 const MINIMAP_STORAGE_KEY = 'image-mixer.show-minimap'
+const SNAP_TO_GRID_STORAGE_KEY = 'image-mixer.snap-to-grid'
+const DOTS_STORAGE_KEY = 'image-mixer.show-dots'
 
 const EMPTY_LLM_STATUS: LlmStatus = {
   phase: 'stopped',
@@ -1012,6 +1014,8 @@ function Editor(): React.JSX.Element {
   const [llmSettingsError, setLlmSettingsError] = useState<string | null>(null)
   const [settingsTab, setSettingsTab] = useState<'llm' | 'display'>('llm')
   const [showMinimap, setShowMinimap] = useState(() => window.localStorage.getItem(MINIMAP_STORAGE_KEY) !== '0')
+  const [snapToGrid, setSnapToGrid] = useState(() => window.localStorage.getItem(SNAP_TO_GRID_STORAGE_KEY) === '1')
+  const [showDots, setShowDots] = useState(() => window.localStorage.getItem(DOTS_STORAGE_KEY) !== '0')
   const [library, setLibrary] = useState<LibraryInfo | null>(null)
   const [libraryMenu, setLibraryMenu] = useState<string[] | null>(null)
   const [sessions, setSessions] = useState<SessionRecord[]>([])
@@ -1194,6 +1198,16 @@ function Editor(): React.JSX.Element {
   const toggleMinimap = useCallback((visible: boolean): void => {
     setShowMinimap(visible)
     window.localStorage.setItem(MINIMAP_STORAGE_KEY, visible ? '1' : '0')
+  }, [])
+
+  const toggleSnapToGrid = useCallback((enabled: boolean): void => {
+    setSnapToGrid(enabled)
+    window.localStorage.setItem(SNAP_TO_GRID_STORAGE_KEY, enabled ? '1' : '0')
+  }, [])
+
+  const toggleDots = useCallback((visible: boolean): void => {
+    setShowDots(visible)
+    window.localStorage.setItem(DOTS_STORAGE_KEY, visible ? '1' : '0')
   }, [])
 
   const saveLlmSettings = useCallback(async (event: React.FormEvent): Promise<void> => {
@@ -2549,6 +2563,8 @@ function Editor(): React.JSX.Element {
               onDragOver={dragImageOverCanvas}
               onDrop={(event) => void dropImageOnCanvas(event)}
               onMoveEnd={(_event, viewport) => setCanvasViewport(viewport)}
+              snapToGrid={snapToGrid}
+              snapGrid={[22, 22]}
               panOnDrag={[1]}
               selectionOnDrag
               selectionMode={SelectionMode.Partial}
@@ -2559,7 +2575,7 @@ function Editor(): React.JSX.Element {
               proOptions={{ hideAttribution: true }}
               defaultEdgeOptions={{ style: { strokeWidth: 2, stroke: '#77869b' } }}
             >
-              <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color='#2b3441' />
+              {showDots && <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color='#394154' />}
               {showMinimap && <MiniMap
                 position='bottom-left'
                 pannable
@@ -2724,6 +2740,8 @@ function Editor(): React.JSX.Element {
                       <div className='llm-settings-section-title'>表示</div>
                       <div className='llm-setting-toggles'>
                         <label><input type='checkbox' checked={showMinimap} onChange={(event) => toggleMinimap(event.target.checked)} /><span>ミニマップを表示</span></label>
+                        <label><input type='checkbox' checked={showDots} onChange={(event) => toggleDots(event.target.checked)} /><span>背景のドットを表示</span></label>
+                        <label><input type='checkbox' checked={snapToGrid} onChange={(event) => toggleSnapToGrid(event.target.checked)} /><span>ノードをスナップする</span></label>
                       </div>
                       <p className='llm-settings-note'>変更は即座に反映され、次回起動時も保持されます。</p>
                     </section>
