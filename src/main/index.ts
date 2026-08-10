@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, shell } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
-import { access, copyFile, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, copyFile, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import * as os from 'node:os'
@@ -171,6 +171,18 @@ function appSettingsPath(): string {
   return join(dataRoot(), 'app-settings.json')
 }
 
+async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
+  // Write-then-rename keeps the existing file intact if the process dies mid-write.
+  const tempPath = `${filePath}.${randomUUID()}.tmp`
+  await writeFile(tempPath, JSON.stringify(value, null, 2), 'utf8')
+  try {
+    await rename(tempPath, filePath)
+  } catch (error) {
+    await rm(tempPath, { force: true })
+    throw error
+  }
+}
+
 function libraryInfo(): LibraryInfo {
   return { rootPath: libraryRoot, name: basename(libraryRoot) || libraryRoot }
 }
@@ -223,7 +235,7 @@ async function loadLibraryRoot(): Promise<void> {
 
 async function saveAppSettings(): Promise<void> {
   await mkdir(dataRoot(), { recursive: true })
-  await writeFile(appSettingsPath(), JSON.stringify({ libraryRoot, libraryHistory, llm: llmConfig }, null, 2), 'utf8')
+  await writeJsonFile(appSettingsPath(), { libraryRoot, libraryHistory, llm: llmConfig })
 }
 
 function emptySnapshot(): SessionSnapshot {
@@ -261,7 +273,7 @@ async function createSession(name: string): Promise<SessionRecord> {
   const now = new Date().toISOString()
   const session: SessionRecord = { id: randomUUID(), name: name.trim() || 'New session', createdAt: now, updatedAt: now }
   await mkdir(join(sessionDirectory(session.id), 'assets'), { recursive: true })
-  await writeFile(sessionFile(session.id), JSON.stringify({ session, snapshot: emptySnapshot() }, null, 2), 'utf8')
+  await writeJsonFile(sessionFile(session.id), { session, snapshot: emptySnapshot() })
   return session
 }
 
@@ -272,7 +284,7 @@ async function renameSession(sessionId: string, name: string): Promise<SessionRe
     name: name.trim() || parsed.session.name,
     updatedAt: new Date().toISOString()
   }
-  await writeFile(sessionFile(sessionId), JSON.stringify({ session, snapshot: parsed.snapshot ?? emptySnapshot() }, null, 2), 'utf8')
+  await writeJsonFile(sessionFile(sessionId), { session, snapshot: parsed.snapshot ?? emptySnapshot() })
   return session
 }
 
@@ -315,7 +327,7 @@ async function duplicateSession(sessionId: string): Promise<{ session: SessionRe
   try {
     await mkdir(targetDirectory, { recursive: true })
     await cp(join(sourceDirectory, 'assets'), join(targetDirectory, 'assets'), { recursive: true })
-    await writeFile(sessionFile(id), JSON.stringify({ session, snapshot }, null, 2), 'utf8')
+    await writeJsonFile(sessionFile(id), { session, snapshot })
     await cleanupUnusedSessionAssets(id, snapshot)
     return { session, snapshot: await hydrateSnapshot(snapshot) }
   } catch (error) {
@@ -329,7 +341,7 @@ async function readSession(sessionId: string): Promise<{ session: SessionRecord;
   const healed = healSnapshotAssetPaths(sessionId, parsed.snapshot ?? emptySnapshot())
   const recovered = recoverInterruptedGenerations(sessionId, healed.snapshot)
   if (recovered.recovered || healed.healed) {
-    await writeFile(sessionFile(sessionId), JSON.stringify({ session: parsed.session, snapshot: stripDataUrls(recovered.snapshot) }, null, 2), 'utf8')
+    await writeJsonFile(sessionFile(sessionId), { session: parsed.session, snapshot: stripDataUrls(recovered.snapshot) })
   }
   return { session: parsed.session, snapshot: await hydrateSnapshot(recovered.snapshot) }
 }
@@ -466,15 +478,18 @@ async function imagePreview(source: string | Buffer, previewWidth = 512): Promis
   const image = sharp(source, { failOn: 'error' })
   const metadata = await image.metadata()
   if (!metadata.width || !metadata.height) throw new Error('Image dimensions could not be determined')
+  // EXIF orientations 5-8 rotate by 90°, so the displayed width/height are transposed.
+  const transposed = (metadata.orientation ?? 1) >= 5
   const preview = await image
     .clone()
+    .rotate()
     .resize({ width: previewWidth, withoutEnlargement: true })
     .png()
     .toBuffer()
   return {
     dataUrl: `data:image/png;base64,${preview.toString('base64')}`,
-    width: metadata.width,
-    height: metadata.height
+    width: transposed ? metadata.height : metadata.width,
+    height: transposed ? metadata.width : metadata.height
   }
 }
 
@@ -496,7 +511,7 @@ async function saveSession(sessionId: string, snapshot: SessionSnapshot, protect
   const current = JSON.parse(await readFile(sessionFile(sessionId), 'utf8')) as { session: SessionRecord }
   const session = { ...current.session, updatedAt: new Date().toISOString() }
   const persistedSnapshot = stripDataUrls(snapshot)
-  await writeFile(sessionFile(sessionId), JSON.stringify({ session, snapshot: persistedSnapshot }, null, 2), 'utf8')
+  await writeJsonFile(sessionFile(sessionId), { session, snapshot: persistedSnapshot })
   await cleanupUnusedSessionAssets(sessionId, persistedSnapshot, saveStartedAt, protectedPaths)
   return session
 }
@@ -609,7 +624,7 @@ async function writeBatchManifest(outputDirectory: string, manifest: BatchManife
   const output = validateBatchOutputDirectory(outputDirectory)
   if (resolve(manifest.outputDirectory) !== output) throw new Error('Batch manifest output folder does not match')
   if (resolve(manifest.inputDirectory) !== dirname(output)) throw new Error('Batch manifest input folder does not match')
-  await writeFile(join(output, 'batch-result.json'), JSON.stringify(manifest, null, 2), 'utf8')
+  await writeJsonFile(join(output, 'batch-result.json'), manifest)
 }
 
 async function revealBatchOutput(outputDirectory: string): Promise<void> {

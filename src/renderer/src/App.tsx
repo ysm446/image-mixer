@@ -981,6 +981,16 @@ function hasPath(edges: EditorEdge[], from: string, to: string): boolean {
   return false
 }
 
+// ipcRenderer.invoke rejections arrive as "Error invoking remote method '<channel>': Error: <message>".
+function ipcErrorMessage(error: unknown): string {
+  const message = String(error instanceof Error ? error.message : error)
+  return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+}
+
+function isGenerationCanceled(error: unknown): boolean {
+  return ipcErrorMessage(error) === 'Generation canceled'
+}
+
 function isEditableElement(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target.isContentEditable
@@ -1181,7 +1191,7 @@ function Editor(): React.JSX.Element {
         : await window.imageMixer.startComfyUI()
       setComfy(status)
     } catch (error) {
-      setComfy((current) => ({ ...current, phase: 'error', message: error instanceof Error ? error.message : String(error) }))
+      setComfy((current) => ({ ...current, phase: 'error', message: ipcErrorMessage(error) }))
     } finally {
       setComfyTogglePending(false)
     }
@@ -1195,7 +1205,7 @@ function Editor(): React.JSX.Element {
       setLlm(status)
       setLlmSettingsDraft(status.config)
     } catch (error) {
-      setLlmModelPickerError(error instanceof Error ? error.message : String(error))
+      setLlmModelPickerError(ipcErrorMessage(error))
     }
   }, [])
 
@@ -1212,7 +1222,7 @@ function Editor(): React.JSX.Element {
       status = await window.imageMixer.loadLlm()
       setLlm(status)
     } catch (error) {
-      setLlm((current) => ({ ...current, phase: 'error', message: error instanceof Error ? error.message : String(error) }))
+      setLlm((current) => ({ ...current, phase: 'error', message: ipcErrorMessage(error) }))
     } finally {
       setLlmTogglePending(false)
     }
@@ -1225,7 +1235,7 @@ function Editor(): React.JSX.Element {
       const shouldUnload = llm.phase === 'ready' && !llm.restartRequired
       setLlm(shouldUnload ? await window.imageMixer.unloadLlm() : await window.imageMixer.loadLlm())
     } catch (error) {
-      setLlm((current) => ({ ...current, phase: 'error', message: error instanceof Error ? error.message : String(error) }))
+      setLlm((current) => ({ ...current, phase: 'error', message: ipcErrorMessage(error) }))
     } finally {
       setLlmTogglePending(false)
     }
@@ -1263,7 +1273,7 @@ function Editor(): React.JSX.Element {
       setLlmSettingsDraft(status.config)
       setLlmSettingsOpen(false)
     } catch (error) {
-      setLlmSettingsError(error instanceof Error ? error.message : String(error))
+      setLlmSettingsError(ipcErrorMessage(error))
     }
   }, [llmSettingsDraft])
 
@@ -1274,7 +1284,7 @@ function Editor(): React.JSX.Element {
       setLlm(status)
       setLlmSettingsDraft(status.config)
     } catch (error) {
-      setLlmSettingsError(error instanceof Error ? error.message : String(error))
+      setLlmSettingsError(ipcErrorMessage(error))
     }
   }, [])
 
@@ -1376,7 +1386,7 @@ function Editor(): React.JSX.Element {
           setSidebarError(null)
           setScreenshotNotice(sourcePath)
         })
-        .catch((error: unknown) => setSidebarError(error instanceof Error ? error.message : String(error)))
+        .catch((error: unknown) => setSidebarError(ipcErrorMessage(error)))
     }
     window.addEventListener('keydown', captureScreenshot, true)
     return () => window.removeEventListener('keydown', captureScreenshot, true)
@@ -1394,7 +1404,7 @@ function Editor(): React.JSX.Element {
       await window.imageMixer.revealScreenshot(screenshotNotice)
       setScreenshotNotice(null)
     } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : String(error))
+      setSidebarError(ipcErrorMessage(error))
     }
   }, [screenshotNotice])
 
@@ -1454,7 +1464,7 @@ function Editor(): React.JSX.Element {
 
   useEffect(() => {
     void window.imageMixer.bootstrapLibrary().then(applyBootstrap).catch((error: unknown) => {
-      setSidebarError(error instanceof Error ? error.message : String(error))
+      setSidebarError(ipcErrorMessage(error))
     })
   }, [applyBootstrap])
 
@@ -1479,13 +1489,27 @@ function Editor(): React.JSX.Element {
     saveTimer.current = setTimeout(() => {
       const snapshot: SessionSnapshot = { nodes, edges, viewport: canvasViewport ?? getViewport() }
       void window.imageMixer.saveSession(activeSession.id, snapshot, historyProtectedPaths()).catch((error: unknown) => {
-        setSidebarError(error instanceof Error ? error.message : String(error))
+        setSidebarError(ipcErrorMessage(error))
       })
     }, 500)
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
   }, [activeSession, canvasViewport, edges, getViewport, historyProtectedPaths, hydratedSessionId, nodes])
+
+  useEffect(() => {
+    if (!activeSession || hydratedSessionId !== activeSession.id) return
+    // The debounced auto-save loses up to 500ms of edits when the window closes; flush them.
+    const flushSaveBeforeUnload = (): void => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current)
+        saveTimer.current = null
+      }
+      void window.imageMixer.saveSession(activeSession.id, { nodes: nodesRef.current, edges: edgesRef.current, viewport: getViewport() }, historyProtectedPaths()).catch(() => {})
+    }
+    window.addEventListener('beforeunload', flushSaveBeforeUnload)
+    return () => window.removeEventListener('beforeunload', flushSaveBeforeUnload)
+  }, [activeSession, getViewport, historyProtectedPaths, hydratedSessionId])
 
   const flushHistory = useCallback((): void => {
     const history = historyRef.current
@@ -1603,7 +1627,7 @@ function Editor(): React.JSX.Element {
       })
     } catch (error) {
       imageDescriptionIds.current.delete(nodeId)
-      updateNode(nodeId, { state: 'failed', error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAtMs, startedAtMs: null })
+      updateNode(nodeId, { state: 'failed', error: ipcErrorMessage(error), durationMs: Date.now() - startedAtMs, startedAtMs: null })
     }
   }, [activeSession, edges, llm.phase, llm.restartRequired, nodes, updateNode])
 
@@ -1646,7 +1670,7 @@ function Editor(): React.JSX.Element {
       })
     } catch (error) {
       textTransformationIds.current.delete(nodeId)
-      updateNode(nodeId, { state: 'failed', error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAtMs, startedAtMs: null })
+      updateNode(nodeId, { state: 'failed', error: ipcErrorMessage(error), durationMs: Date.now() - startedAtMs, startedAtMs: null })
     }
   }, [activeSession, edges, llm.phase, llm.restartRequired, nodes, updateNode])
 
@@ -1668,7 +1692,7 @@ function Editor(): React.JSX.Element {
       const folder = await window.imageMixer.chooseBatchFolder()
       if (folder) updateNode(nodeId, { folder, error: null })
     } catch (error) {
-      updateNode(nodeId, { error: error instanceof Error ? error.message : String(error) })
+      updateNode(nodeId, { error: ipcErrorMessage(error) })
     }
   }, [updateNode])
 
@@ -1689,7 +1713,7 @@ function Editor(): React.JSX.Element {
       updateNode(nodeId, { image })
       setSidebarError(null)
     } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : String(error))
+      setSidebarError(ipcErrorMessage(error))
     }
   }, [activeSession, updateNode])
 
@@ -1723,7 +1747,7 @@ function Editor(): React.JSX.Element {
       }])
       setSidebarError(null)
     } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : String(error))
+      setSidebarError(ipcErrorMessage(error))
     }
   }, [activeSession, screenToFlowPosition, setNodes])
 
@@ -1807,12 +1831,12 @@ function Editor(): React.JSX.Element {
     } catch (error) {
       const startedAtMs = generationStartTimes.current.get(key)
       generationStartTimes.current.delete(key)
-      const wasCanceled = canceledGenerationIds.current.delete(key) || (error instanceof Error && error.message === 'Generation canceled')
+      const wasCanceled = canceledGenerationIds.current.delete(key) || isGenerationCanceled(error)
       setGenerationProgress((current) => current?.nodeId === nodeId ? null : current)
       if (activeSessionIdRef.current === sessionId) {
         updateNode(nodeId, wasCanceled
           ? { state: 'canceled', error: null, durationMs: startedAtMs == null ? null : Date.now() - startedAtMs, startedAtMs: null }
-          : { state: 'failed', error: error instanceof Error ? error.message : String(error), durationMs: startedAtMs == null ? null : Date.now() - startedAtMs, startedAtMs: null })
+          : { state: 'failed', error: ipcErrorMessage(error), durationMs: startedAtMs == null ? null : Date.now() - startedAtMs, startedAtMs: null })
         showStatusNotice(wasCanceled ? `生成をキャンセルしました: ${target.data.title}` : `生成に失敗しました: ${target.data.title}`)
       }
     }
@@ -1903,9 +1927,9 @@ function Editor(): React.JSX.Element {
           succeeded += 1
           manifestItems.push({ inputPath: file.path, outputPath: saved.path, seed: settings.seed, settings, error: null })
         } catch (error) {
-          if (batchCancelRequested.current.has(batchKey) || (error instanceof Error && error.message === 'Generation canceled')) break
+          if (batchCancelRequested.current.has(batchKey) || isGenerationCanceled(error)) break
           failed += 1
-          manifestItems.push({ inputPath: file.path, outputPath: null, seed: settings.seed, settings, error: error instanceof Error ? error.message : String(error) })
+          manifestItems.push({ inputPath: file.path, outputPath: null, seed: settings.seed, settings, error: ipcErrorMessage(error) })
         } finally {
           generationStartTimes.current.delete(generationJobKey(sessionId, jobNodeId))
           batchCurrentJobIds.current.delete(batchKey)
@@ -1938,7 +1962,7 @@ function Editor(): React.JSX.Element {
       })
       showStatusNotice(canceled ? '一括処理をキャンセルしました' : `一括処理が完了しました (成功 ${succeeded} / 失敗 ${failed})`)
     } catch (error) {
-      updateNode(nodeId, { state: batchCancelRequested.current.has(batchKey) ? 'canceled' : 'failed', currentFile: null, error: batchCancelRequested.current.has(batchKey) ? null : error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAtMs, startedAtMs: null })
+      updateNode(nodeId, { state: batchCancelRequested.current.has(batchKey) ? 'canceled' : 'failed', currentFile: null, error: batchCancelRequested.current.has(batchKey) ? null : ipcErrorMessage(error), durationMs: Date.now() - startedAtMs, startedAtMs: null })
     } finally {
       batchCurrentJobIds.current.delete(batchKey)
       batchCancelRequested.current.delete(batchKey)
@@ -1963,7 +1987,7 @@ function Editor(): React.JSX.Element {
     try {
       await window.imageMixer.revealBatchOutput(target.data.outputDirectory)
     } catch (error) {
-      updateNode(nodeId, { error: error instanceof Error ? error.message : String(error) })
+      updateNode(nodeId, { error: ipcErrorMessage(error) })
     }
   }, [nodes, updateNode])
 
@@ -1985,7 +2009,7 @@ function Editor(): React.JSX.Element {
       updateNode(nodeId, { state: 'canceled', error: null, durationMs, startedAtMs: null })
     } catch (error) {
       canceledGenerationIds.current.delete(key)
-      updateNode(nodeId, { error: error instanceof Error ? error.message : String(error) })
+      updateNode(nodeId, { error: ipcErrorMessage(error) })
     }
   }, [activeSession, nodes, updateNode])
   const copyResult = useCallback(async (nodeId: string): Promise<boolean> => {
@@ -1997,7 +2021,7 @@ function Editor(): React.JSX.Element {
       showStatusNotice('生成画像をクリップボードへコピーしました')
       return true
     } catch (error) {
-      updateNode(nodeId, { error: error instanceof Error ? error.message : String(error) })
+      updateNode(nodeId, { error: ipcErrorMessage(error) })
       return false
     }
   }, [nodes, showStatusNotice, updateNode])
@@ -2011,7 +2035,7 @@ function Editor(): React.JSX.Element {
       if (saved) showStatusNotice('生成画像を保存しました')
       return saved
     } catch (error) {
-      updateNode(nodeId, { error: error instanceof Error ? error.message : String(error) })
+      updateNode(nodeId, { error: ipcErrorMessage(error) })
       return false
     }
   }, [nodes, showStatusNotice, updateNode])
@@ -2142,7 +2166,7 @@ function Editor(): React.JSX.Element {
       showStatusNotice(`${pastedNodes.length}個のノードを貼り付けました`)
       return true
     } catch (error) {
-      setSidebarError(`ノードを貼り付けられませんでした: ${error instanceof Error ? error.message : String(error)}`)
+      setSidebarError(`ノードを貼り付けられませんでした: ${ipcErrorMessage(error)}`)
       return false
     }
   }, [activeSession, edges, nodes, screenToFlowPosition, setEdges, setNodes, showStatusNotice])
@@ -2320,7 +2344,7 @@ function Editor(): React.JSX.Element {
       const bootstrap = await window.imageMixer.chooseLibrary()
       if (bootstrap) applyBootstrap(bootstrap)
     } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : String(error))
+      setSidebarError(ipcErrorMessage(error))
     }
   }, [applyBootstrap, saveCurrentSession])
 
@@ -2333,7 +2357,7 @@ function Editor(): React.JSX.Element {
     try {
       setLibraryMenu(await window.imageMixer.getRecentLibraries())
     } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : String(error))
+      setSidebarError(ipcErrorMessage(error))
     }
   }, [libraryMenu])
 
@@ -2343,7 +2367,7 @@ function Editor(): React.JSX.Element {
       await saveCurrentSession()
       applyBootstrap(await window.imageMixer.openLibrary(rootPath))
     } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : String(error))
+      setSidebarError(ipcErrorMessage(error))
     }
   }, [applyBootstrap, saveCurrentSession])
 
@@ -2364,7 +2388,7 @@ function Editor(): React.JSX.Element {
       setHydratedSessionId(created.session.id)
       setSidebarError(null)
     } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : String(error))
+      setSidebarError(ipcErrorMessage(error))
     }
   }, [saveCurrentSession, sessions, setEdges, setNodes])
 
@@ -2384,7 +2408,7 @@ function Editor(): React.JSX.Element {
       setHydratedSessionId(loaded.session.id)
       setSidebarError(null)
     } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : String(error))
+      setSidebarError(ipcErrorMessage(error))
     }
   }, [activeSession?.id, saveCurrentSession, setEdges, setNodes])
 
@@ -2406,7 +2430,7 @@ function Editor(): React.JSX.Element {
       setHydratedSessionId(duplicated.session.id)
       setSidebarError(null)
     } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : String(error))
+      setSidebarError(ipcErrorMessage(error))
     }
   }, [saveCurrentSession, setEdges, setNodes])
 
@@ -2420,7 +2444,7 @@ function Editor(): React.JSX.Element {
       const bootstrap = await window.imageMixer.deleteSession(session.id)
       applyBootstrap(bootstrap)
     } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : String(error))
+      setSidebarError(ipcErrorMessage(error))
     }
   }, [activeSession?.id, applyBootstrap])
 
@@ -2461,7 +2485,7 @@ function Editor(): React.JSX.Element {
       setRenameDraft('')
       setSidebarError(null)
     } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : String(error))
+      setSidebarError(ipcErrorMessage(error))
       requestAnimationFrame(() => renameInputRef.current?.focus())
     } finally {
       renameCommitPending.current = false
@@ -2914,7 +2938,7 @@ function Editor(): React.JSX.Element {
               onPointerDown={(event) => event.stopPropagation()}
             >
               <img src={previewImage.dataUrl} alt={`${previewImage.name} preview`} draggable={false} />
-              {previewImage.width && previewImage.height && <div className='image-preview-resolution'>{previewImage.width} × {previewImage.height}</div>}
+              {previewImage.width > 0 && previewImage.height > 0 && <div className='image-preview-resolution'>{previewImage.width} × {previewImage.height}</div>}
             </div>
           </div>
         )}
