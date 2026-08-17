@@ -886,16 +886,25 @@ async function uploadImage(filePath: string, signal: AbortSignal): Promise<strin
 
 function applyRequest(workflow: Workflow, request: GenerateRequest, uploadedImages: Array<string | null>): Workflow {
   const sampler = findNode(workflow, 'KSampler')[1]
-  const positive = findNode(workflow, 'TextEncodeQwenImageEditPlus', (node) => node._meta?.title?.includes('Input Prompt') === true)[1]
+  const positiveEntry = Object.entries(workflow).find(([, node]) =>
+    (node.class_type === 'TextEncodeQwenImageEditPlus' || node.class_type === 'CLIPTextEncode') && node._meta?.title?.includes('Input Prompt') === true)
+  if (!positiveEntry) throw new Error('Workflow node not found: Input Prompt')
+  const positive = positiveEntry[1]
   const size = findNode(workflow, 'EmptyLatentImage')[1]
 
   sampler.inputs.seed = request.settings.seed
   sampler.inputs.steps = request.settings.steps
   sampler.inputs.cfg = request.settings.cfg
-  positive.inputs.prompt = request.prompt
+  positive.inputs[positive.class_type === 'CLIPTextEncode' ? 'text' : 'prompt'] = request.prompt
   size.inputs.width = request.settings.width
   size.inputs.height = request.settings.height
   size.inputs.batch_size = 1
+
+  const modelSampling = Object.values(workflow).find((node) => node.class_type === 'ModelSamplingFlux')
+  if (modelSampling) {
+    modelSampling.inputs.width = request.settings.width
+    modelSampling.inputs.height = request.settings.height
+  }
 
   if (uploadedImages.some(Boolean)) {
     const loadNodes = Object.entries(workflow)
@@ -948,7 +957,8 @@ function validateGenerateRequest(request: GenerateRequest): void {
   sessionDirectory(request.sessionId)
   if (!request.prompt.trim()) throw new Error('Connect a non-empty Prompt node')
   if (request.imagePaths.length !== 3 || request.imageSourceNodeIds.length !== 3) throw new Error('Image inputs must contain three slots')
-  const { width, height, seed, steps, cfg } = request.settings
+  const { width, height, seed, steps, cfg, model } = request.settings
+  if (model != null && model !== 'qwen' && model !== 'krea2') throw new Error('Model must be qwen or krea2')
   if (!Number.isInteger(width) || width < 64 || width > 4096 || width % 8 !== 0) throw new Error('Width must be a multiple of 8 between 64 and 4096')
   if (!Number.isInteger(height) || height < 64 || height > 4096 || height % 8 !== 0) throw new Error('Height must be a multiple of 8 between 64 and 4096')
   if (!Number.isSafeInteger(seed) || seed < 0) throw new Error('Seed must be a non-negative safe integer')
@@ -1005,7 +1015,10 @@ async function runImageGeneration(job: GenerationJob): Promise<GeneratedImage> {
   let destination: string | null = null
   let stopProgressWatch: (() => void) | null = null
   try {
-    const workflowName = connectedImageCount > 0 ? 'Qwen-Rapid-AIO.json' : 'Qwen-Rapid-AIO-Generate.json'
+    const model = request.settings.model ?? 'qwen'
+    const workflowName = model === 'krea2'
+      ? connectedImageCount > 0 ? 'Krea2-Turbo.json' : 'Krea2-Turbo-Generate.json'
+      : connectedImageCount > 0 ? 'Qwen-Rapid-AIO.json' : 'Qwen-Rapid-AIO-Generate.json'
     const workflowPath = join(projectRoot(), 'workflows', workflowName)
     const workflow = JSON.parse(await readFile(workflowPath, 'utf8')) as Workflow
     const uploads: Array<string | null> = []

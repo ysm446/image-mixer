@@ -1,11 +1,13 @@
 # 進捗
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-10 20:55
+更新日時: 2026-08-17 07:26
 
 ## 現在の状態
 
 Electron + React Flowの動作版を実装済みです。Text、Image、Image Generate、Batch Image Generateノードに加え、左サイドバーからルートフォルダと複数セッションを管理できます。各セッションのグラフ、入力画像、生成結果は個別のフォルダへ保存されます。
+
+- 生成モデルをノード単位で選択できるようにした。Image Generate / Batch Image GenerateのModel設定でQwen Rapid AIOとKrea 2 Turboを切り替えられる。Krea 2はComfyUI 0.30.0のコア対応(`comfy/ldm/krea2`、CLIPLoaderの`krea2`タイプ)を使用し、編集ワークフローはQwenと同じ`TextEncodeQwenImageEditPlus`で最大3枚の参照画像を受け取る。
 
 - Batch Image Generateノードを追加した。選択フォルダ直下のPNG・JPEG・WebP・BMPを開始時に固定し、各画像をImage 1として既存FIFOキューで1枚ずつ処理する。日時付きの新規出力フォルダへ結果と`batch-result.json`を保存し、進捗表示、個別失敗の継続、キャンセル、出力フォルダ表示に対応した。
 
@@ -31,6 +33,8 @@ Electron + React Flowの動作版を実装済みです。Text、Image、Image Ge
 - ルートプロジェクトをGitリポジトリとして初期化済み。`runtime/ComfyUI`は独立したGitリポジトリとしてルート側の追跡対象から除外する。
 
 ## 完了済み
+
+- Krea 2 Turbo対応を追加した。`workflows/Krea2-Turbo.json`(編集、ModelSamplingFlux + FluxKontextMultiReferenceLatentMethod `index_timestep_zero`)と`workflows/Krea2-Turbo-Generate.json`(テキスト生成、CLIPTextEncode + ConditioningZeroOut)を作成し、`applyRequest`をCLIPTextEncode・ModelSamplingFluxにも対応させた。モデルは`models/diffusion_models/krea2_turbo_fp8_scaled.safetensors`、`models/text_encoders/qwen3vl_4b_fp8_scaled.safetensors`、`models/vae/qwen_image_vae.safetensors`を配置済み。固定seedのsmoke test(t2i、参照3枚編集、参照1枚編集)で出力画像の取得を確認した。Krea 2の既定サンプラーはeuler / simple / 8 steps / CFG 1。
 
 - コードレビューに基づく堅牢性修正を行った。IPCエラー表示の接頭辞除去とキャンセル判定の修正、JSON保存の原子的書き込み化、終了時の自動保存フラッシュ、EXIF回転画像のプレビュー・解像度対応、拡大プレビューの解像度0表示バグ修正。
 

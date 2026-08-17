@@ -106,12 +106,22 @@ export interface ImageAsset {
   height: number
 }
 
+export type GenerateModel = 'qwen' | 'krea2'
+
+export const DEFAULT_GENERATE_MODEL: GenerateModel = 'qwen'
+
+export const GENERATE_MODEL_OPTIONS: ReadonlyArray<{ value: GenerateModel; label: string; defaultSteps: number }> = [
+  { value: 'qwen', label: 'Qwen Rapid AIO', defaultSteps: 4 },
+  { value: 'krea2', label: 'Krea 2 Turbo', defaultSteps: 8 }
+]
+
 export interface GenerateSettings {
   width: number
   height: number
   seed: number
   steps: number
   cfg: number
+  model?: GenerateModel
 }
 
 export interface GenerateRequest {

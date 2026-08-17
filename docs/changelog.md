@@ -1,9 +1,16 @@
 # Changelog
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-10 20:55
+更新日時: 2026-08-17 07:26
 
 ## 未リリース
+
+### 2026-08-17 07:26
+
+- 生成モデルにKrea 2 Turboを追加した。Image GenerateとBatch Image Generateノードの設定にModel選択(Qwen Rapid AIO / Krea 2 Turbo)を追加し、ノード単位でモデルを切り替えられる。
+- Krea 2用のAPIワークフロー`workflows/Krea2-Turbo.json`(画像編集、最大3枚の参照画像)と`workflows/Krea2-Turbo-Generate.json`(テキスト生成)を追加した。`krea2_turbo_fp8_scaled.safetensors` + Qwen3-VLテキストエンコーダ + Qwen Image VAEを使用する。
+- モデル切替時、Stepsが切替前モデルの既定値のままの場合だけ新モデルの既定値(Qwen 4 / Krea2 8)へ自動調整する。手動で変更したStepsは維持する。
+- 既存セッションの生成ノードはモデル未設定として読み込み、従来どおりQwenで動作する。
 
 ### 2026-08-10 20:55
 

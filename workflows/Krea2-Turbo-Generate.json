@@ -1,0 +1,58 @@
+{
+  "1": {
+    "inputs": { "unet_name": "krea2_turbo_fp8_scaled.safetensors", "weight_dtype": "default" },
+    "class_type": "UNETLoader",
+    "_meta": { "title": "Krea 2 Turbo Diffusion Model" }
+  },
+  "2": {
+    "inputs": {
+      "seed": 65454653,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": ["1", 0],
+      "positive": ["3", 0],
+      "negative": ["4", 0],
+      "latent_image": ["9", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "Kサンプラー" }
+  },
+  "3": {
+    "inputs": { "text": "Create an image from the description.", "clip": ["12", 0] },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Krea2 Input Prompt" }
+  },
+  "4": {
+    "inputs": { "conditioning": ["3", 0] },
+    "class_type": "ConditioningZeroOut",
+    "_meta": { "title": "Negative (zeroed)" }
+  },
+  "5": {
+    "inputs": { "samples": ["2", 0], "vae": ["13", 0] },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAEデコード" }
+  },
+  "6": {
+    "inputs": { "images": ["5", 0] },
+    "class_type": "PreviewImage",
+    "_meta": { "title": "画像プレビュー" }
+  },
+  "9": {
+    "inputs": { "width": 768, "height": 768, "batch_size": 1 },
+    "class_type": "EmptyLatentImage",
+    "_meta": { "title": "Final Image Size" }
+  },
+  "12": {
+    "inputs": { "clip_name": "qwen3vl_4b_fp8_scaled.safetensors", "type": "krea2", "device": "default" },
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "Qwen3-VL Text Encoder" }
+  },
+  "13": {
+    "inputs": { "vae_name": "qwen_image_vae.safetensors" },
+    "class_type": "VAELoader",
+    "_meta": { "title": "Qwen Image VAE" }
+  }
+}

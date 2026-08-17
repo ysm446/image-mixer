@@ -19,8 +19,8 @@ import {
   type NodeProps
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT, DEFAULT_TEXT_TRANSFORM_SYSTEM_PROMPT } from '../../main/types'
-import type { BatchFolderSelection, BatchManifest, BatchManifestItem, ComfyStatus, GeneratedImage, GenerateSettings, GenerationProgressEvent, ImageAsset, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SessionViewport } from '../../main/types'
+import { DEFAULT_GENERATE_MODEL, DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT, DEFAULT_TEXT_TRANSFORM_SYSTEM_PROMPT, GENERATE_MODEL_OPTIONS } from '../../main/types'
+import type { BatchFolderSelection, BatchManifest, BatchManifestItem, ComfyStatus, GeneratedImage, GenerateModel, GenerateSettings, GenerationProgressEvent, ImageAsset, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SessionViewport } from '../../main/types'
 import { SystemResourceMonitor } from './SystemResourceMonitor'
 
 type RenderState = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
@@ -661,6 +661,26 @@ function NumberField({
   )
 }
 
+function ModelField({ value, onChange }: { value: GenerateModel; onChange: (value: GenerateModel) => void }): React.JSX.Element {
+  return (
+    <div className='setting-field model-setting-field'>
+      <span>Model</span>
+      <select className='nodrag' value={value} aria-label='Model' onChange={(event) => onChange(event.target.value as GenerateModel)}>
+        {GENERATE_MODEL_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+function settingsForModelChange(settings: GenerateSettings, model: GenerateModel): GenerateSettings {
+  const current = GENERATE_MODEL_OPTIONS.find((option) => option.value === (settings.model ?? DEFAULT_GENERATE_MODEL))
+  const next = GENERATE_MODEL_OPTIONS.find((option) => option.value === model)
+  const steps = next && current && settings.steps === current.defaultSteps ? next.defaultSteps : settings.steps
+  return { ...settings, model, steps }
+}
+
 function formatDuration(durationMs: number): string {
   if (durationMs < 1000) return `${durationMs} ms`
   const totalSeconds = Math.round(durationMs / 1000)
@@ -712,6 +732,7 @@ function GenerateNode({ id, data, selected }: NodeProps<EditorNode>): React.JSX.
       <Handle type='target' position={Position.Left} id='image3' className='handle image-handle pin-image-3' />
 
       <div className='settings-grid'>
+        <ModelField value={generateData.settings.model ?? DEFAULT_GENERATE_MODEL} onChange={(model) => updateNode(id, { settings: settingsForModelChange(generateData.settings, model) })} />
         <div className='size-settings-row'>
           <NumberField label='Width' value={generateData.settings.width} min={MIN_IMAGE_DIMENSION} max={MAX_IMAGE_DIMENSION} step={IMAGE_DIMENSION_STEP} normalize={normalizeImageDimension} onChange={(value) => setSetting('width', value)} />
           <NumberField label='Height' value={generateData.settings.height} min={MIN_IMAGE_DIMENSION} max={MAX_IMAGE_DIMENSION} step={IMAGE_DIMENSION_STEP} normalize={normalizeImageDimension} onChange={(value) => setSetting('height', value)} />
@@ -817,6 +838,7 @@ function BatchGenerateNode({ id, data, selected }: NodeProps<EditorNode>): React
       </button>
 
       <div className='settings-grid batch-settings-grid'>
+        <ModelField value={batchData.settings.model ?? DEFAULT_GENERATE_MODEL} onChange={(model) => updateNode(id, { settings: settingsForModelChange(batchData.settings, model) })} />
         <div className='size-settings-row'>
           <NumberField label='Width' value={batchData.settings.width} min={MIN_IMAGE_DIMENSION} max={MAX_IMAGE_DIMENSION} step={IMAGE_DIMENSION_STEP} normalize={normalizeImageDimension} onChange={(value) => setSetting('width', value)} />
           <NumberField label='Height' value={batchData.settings.height} min={MIN_IMAGE_DIMENSION} max={MAX_IMAGE_DIMENSION} step={IMAGE_DIMENSION_STEP} normalize={normalizeImageDimension} onChange={(value) => setSetting('height', value)} />
@@ -892,7 +914,7 @@ const initialNodes: EditorNode[] = [
     data: {
       kind: 'generate',
       title: 'Image Generate',
-      settings: { width: 768, height: 768, seed: 65454653, steps: 4, cfg: 1 },
+      settings: { width: 768, height: 768, seed: 65454653, steps: 4, cfg: 1, model: DEFAULT_GENERATE_MODEL },
       matchImage1Size: false,
       state: 'idle',
       result: null,
@@ -2288,7 +2310,7 @@ function Editor(): React.JSX.Element {
       kind,
       title: 'Batch Image Generate',
       folder: null,
-      settings: { width: 768, height: 768, seed: Math.floor(Math.random() * 2147483647), steps: 4, cfg: 1 },
+      settings: { width: 768, height: 768, seed: Math.floor(Math.random() * 2147483647), steps: 4, cfg: 1, model: DEFAULT_GENERATE_MODEL },
       matchInputSize: true,
       state: 'idle',
       result: null,
@@ -2305,7 +2327,7 @@ function Editor(): React.JSX.Element {
     else data = {
       kind,
       title: 'Image Generate',
-      settings: { width: 768, height: 768, seed: Math.floor(Math.random() * 2147483647), steps: 4, cfg: 1 },
+      settings: { width: 768, height: 768, seed: Math.floor(Math.random() * 2147483647), steps: 4, cfg: 1, model: DEFAULT_GENERATE_MODEL },
       matchImage1Size: false,
       state: 'idle',
       result: null,
