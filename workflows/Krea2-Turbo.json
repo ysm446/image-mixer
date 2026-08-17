@@ -1,7 +1,7 @@
 {
   "1": {
     "inputs": {
-      "unet_name": "krea2_turbo_fp8_scaled.safetensors",
+      "unet_name": "krea2_turbo_int8_convrot.safetensors",
       "weight_dtype": "default"
     },
     "class_type": "UNETLoader",
@@ -173,7 +173,7 @@
       "width": 1024,
       "height": 1024,
       "model": [
-        "1",
+        "16",
         0
       ]
     },
@@ -193,6 +193,20 @@
     "class_type": "FluxKontextMultiReferenceLatentMethod",
     "_meta": {
       "title": "Reference Method"
+    }
+  },
+  "16": {
+    "inputs": {
+      "lora_name": "krea2_identity_edit_v1_2.safetensors",
+      "strength_model": 1.0,
+      "model": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Krea2 Identity Edit LoRA"
     }
   }
 }

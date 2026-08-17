@@ -1,9 +1,31 @@
 # Changelog
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-17 07:26
+更新日時: 2026-08-17 15:38
 
 ## 未リリース
+
+### 2026-08-17 15:38
+
+- Krea 2連携の仕様書 [docs/reference/krea2.md](reference/krea2.md) を追加した。必要ファイル、ワークフロー構成、LoRA必須の制約、`Picture N`プロンプト規約、推奨パラメータ、トラブルシューティング、ライセンスをまとめた。
+
+### 2026-08-17 15:25
+
+- Krea 2編集でキャラクターの同一性が失われる問題を修正した。`krea2_style_reference.safetensors`は画風転写用LoRAで被写体の同一性を保持しないため、同一性保持特化の`krea2_identity_edit_v1_2.safetensors`(conradlocke/krea2-identity-edit、Krea 2 Community License)へ差し替えた。
+- 実キャラクター2体(アザラシ・柴犬のぬいぐるみ)の握手合成で比較検証し、identity edit LoRAでは模様・頬・眉点等のディテールまで維持されることを確認した。「Picture 1とPicture 2のキャラクターが握手する」のような日本語の短い指示でも良好。参照画像はプロンプト中で`Picture 1`〜`Picture 3`と呼ぶ(エンコード時のラベルと一致するため)。
+- style reference LoRAは画風参照用として`models/loras/`に残置(将来のスタイル転写機能で利用可能)。
+
+### 2026-08-17 14:37
+
+- Krea 2の実行モデルを公式の画像参照構成へ更新した。ブロックノイズの真因は「参照ラテント注入には`krea2_style_reference.safetensors` LoRAが必須」であること(モデルの量子化形式は無関係。int8版でもLoRAなしでは同じノイズを確認)。
+- `krea2_turbo_int8_convrot.safetensors`(12.6GB)と`krea2_style_reference.safetensors`(436MB)を導入し、編集・テキスト生成の両ワークフローをint8_convrot版へ統一した(編集⇔生成のモデル再ロードを回避)。
+- 編集ワークフローへLoRA + 参照ラテント注入(`index_timestep_zero`)を復帰させた。参照キャラクターが立体感を持って自然に合成されるようになり、固定seedの検証(参照3枚・1枚)でノイズなしを確認した。
+- fp8版(`krea2_turbo_fp8_scaled.safetensors`)は未使用になったが、LoRA併用なら正常動作することを確認済みのため`models/diffusion_models/`に残置(削除可)。
+
+### 2026-08-17 13:40
+
+- Krea 2の画像編集で出力全体に格子状のブロックノイズが乗る問題を修正した。原因は`FluxKontextMultiReferenceLatentMethod`による参照ラテント注入がfp8版Krea 2 Turboと整合しないことで、cfgやstepsは無関係(steps 20でも再現、CFG 2ではさらに悪化)。
+- 対処として編集ワークフローから参照ラテント注入を外し、参照画像はQwen3-VL視覚エンコーダ経由の条件付けだけで渡すようにした。参照3枚・1枚の固定seed検証でブロック消失、プロンプト追従、参照内容の反映を確認。参照トークンが減った分、編集の生成時間も短縮される。
 
 ### 2026-08-17 07:26
 
