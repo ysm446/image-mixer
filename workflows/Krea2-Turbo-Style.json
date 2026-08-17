@@ -1,0 +1,212 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "krea2_turbo_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Krea 2 Turbo Diffusion Model"
+    }
+  },
+  "2": {
+    "inputs": {
+      "seed": 65454653,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "14",
+        0
+      ],
+      "positive": [
+        "15",
+        0
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "latent_image": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "Kサンプラー"
+    }
+  },
+  "3": {
+    "inputs": {
+      "prompt": "Put the woman holding a balloon next to the ninja in the hallway.",
+      "clip": [
+        "12",
+        0
+      ],
+      "vae": [
+        "13",
+        0
+      ],
+      "image1": [
+        "7",
+        0
+      ],
+      "image2": [
+        "8",
+        0
+      ],
+      "image3": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": {
+      "title": "Krea2 Input Prompt"
+    }
+  },
+  "4": {
+    "inputs": {
+      "conditioning": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "Negative (zeroed)"
+    }
+  },
+  "5": {
+    "inputs": {
+      "samples": [
+        "2",
+        0
+      ],
+      "vae": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAEデコード"
+    }
+  },
+  "6": {
+    "inputs": {
+      "images": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "画像プレビュー"
+    }
+  },
+  "7": {
+    "inputs": {
+      "image": "ComfyUI_temp_zmuag_00002_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Optional Input Image"
+    }
+  },
+  "8": {
+    "inputs": {
+      "image": "ComfyUI_temp_ljpig_00008_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Optional Input Image"
+    }
+  },
+  "9": {
+    "inputs": {
+      "width": 768,
+      "height": 768,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Final Image Size"
+    }
+  },
+  "10": {
+    "inputs": {
+      "image": "ComfyUI_temp_third_input.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Optional Input Image 3"
+    }
+  },
+  "12": {
+    "inputs": {
+      "clip_name": "qwen3vl_4b_fp8_scaled.safetensors",
+      "type": "krea2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Qwen3-VL Text Encoder"
+    }
+  },
+  "13": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Qwen Image VAE"
+    }
+  },
+  "14": {
+    "inputs": {
+      "max_shift": 1.15,
+      "base_shift": 0.5,
+      "width": 1024,
+      "height": 1024,
+      "model": [
+        "16",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingFlux",
+    "_meta": {
+      "title": "Model Sampling"
+    }
+  },
+  "15": {
+    "inputs": {
+      "conditioning": [
+        "3",
+        0
+      ],
+      "reference_latents_method": "index_timestep_zero"
+    },
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "_meta": {
+      "title": "Reference Method"
+    }
+  },
+  "16": {
+    "inputs": {
+      "lora_name": "krea2_style_reference.safetensors",
+      "strength_model": 1.0,
+      "model": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Krea2 Style Reference LoRA"
+    }
+  }
+}

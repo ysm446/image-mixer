@@ -257,6 +257,7 @@ button { color: inherit; }
 .model-setting-field { grid-column: 1 / -1; }
 .setting-field select { width: 100%; min-width: 0; border: 1px solid #303a48; border-radius: 7px; outline: none; padding: 7px 8px; background: #0d1219; color: #e6edf7; font-size: 11px; cursor: pointer; }
 .setting-field select:focus { border-color: #c17641; }
+.model-tip { margin: 0; color: #77869a; font-size: 9px; line-height: 1.4; text-transform: none; letter-spacing: normal; }
 .setting-random-button { display: grid; width: 30px; flex: none; place-items: center; border: 1px solid #3d4a5b; border-radius: 7px; padding: 0; background: #151d27; color: #9baabd; cursor: pointer; }
 .setting-random-button:hover { border-color: #d18a54; background: #272019; color: #ffc18f; }
 .setting-random-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; }

@@ -106,13 +106,14 @@ export interface ImageAsset {
   height: number
 }
 
-export type GenerateModel = 'qwen' | 'krea2'
+export type GenerateModel = 'qwen' | 'krea2' | 'krea2-style'
 
 export const DEFAULT_GENERATE_MODEL: GenerateModel = 'qwen'
 
-export const GENERATE_MODEL_OPTIONS: ReadonlyArray<{ value: GenerateModel; label: string; defaultSteps: number }> = [
-  { value: 'qwen', label: 'Qwen Rapid AIO', defaultSteps: 4 },
-  { value: 'krea2', label: 'Krea 2 Turbo', defaultSteps: 8 }
+export const GENERATE_MODEL_OPTIONS: ReadonlyArray<{ value: GenerateModel; label: string; defaultSteps: number; tip: string }> = [
+  { value: 'qwen', label: 'Qwen Rapid AIO', defaultSteps: 4, tip: '参照画像を最大3枚接続し、編集指示で合成・編集します。' },
+  { value: 'krea2', label: 'Krea 2 Turbo', defaultSteps: 8, tip: '参照キャラクターの見た目を保って編集します。プロンプトでは参照画像をPicture 1〜3と呼びます(例: Picture 1とPicture 2のキャラクターが握手する)。' },
+  { value: 'krea2-style', label: 'Krea 2 Turbo (Style)', defaultSteps: 8, tip: '参照画像は画風の見本として使います。描きたい内容はTextノードに書きます。参照のキャラクターは引き継がれません。' }
 ]
 
 export interface GenerateSettings {

@@ -958,7 +958,7 @@ function validateGenerateRequest(request: GenerateRequest): void {
   if (!request.prompt.trim()) throw new Error('Connect a non-empty Prompt node')
   if (request.imagePaths.length !== 3 || request.imageSourceNodeIds.length !== 3) throw new Error('Image inputs must contain three slots')
   const { width, height, seed, steps, cfg, model } = request.settings
-  if (model != null && model !== 'qwen' && model !== 'krea2') throw new Error('Model must be qwen or krea2')
+  if (model != null && model !== 'qwen' && model !== 'krea2' && model !== 'krea2-style') throw new Error('Model must be qwen, krea2, or krea2-style')
   if (!Number.isInteger(width) || width < 64 || width > 4096 || width % 8 !== 0) throw new Error('Width must be a multiple of 8 between 64 and 4096')
   if (!Number.isInteger(height) || height < 64 || height > 4096 || height % 8 !== 0) throw new Error('Height must be a multiple of 8 between 64 and 4096')
   if (!Number.isSafeInteger(seed) || seed < 0) throw new Error('Seed must be a non-negative safe integer')
@@ -1016,9 +1016,11 @@ async function runImageGeneration(job: GenerationJob): Promise<GeneratedImage> {
   let stopProgressWatch: (() => void) | null = null
   try {
     const model = request.settings.model ?? 'qwen'
-    const workflowName = model === 'krea2'
-      ? connectedImageCount > 0 ? 'Krea2-Turbo.json' : 'Krea2-Turbo-Generate.json'
-      : connectedImageCount > 0 ? 'Qwen-Rapid-AIO.json' : 'Qwen-Rapid-AIO-Generate.json'
+    const workflowName = model === 'krea2-style'
+      ? connectedImageCount > 0 ? 'Krea2-Turbo-Style.json' : 'Krea2-Turbo-Generate.json'
+      : model === 'krea2'
+        ? connectedImageCount > 0 ? 'Krea2-Turbo.json' : 'Krea2-Turbo-Generate.json'
+        : connectedImageCount > 0 ? 'Qwen-Rapid-AIO.json' : 'Qwen-Rapid-AIO-Generate.json'
     const workflowPath = join(projectRoot(), 'workflows', workflowName)
     const workflow = JSON.parse(await readFile(workflowPath, 'utf8')) as Workflow
     const uploads: Array<string | null> = []

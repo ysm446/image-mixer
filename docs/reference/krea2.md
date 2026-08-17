@@ -1,7 +1,7 @@
 # Krea 2 Turbo 連携仕様
 
 作成日時: 2026-08-17 15:38
-更新日時: 2026-08-17 15:38
+更新日時: 2026-08-17 16:02
 
 Image MixerのImage Generate / Batch Image Generateノードで選択できる実行モデル「Krea 2 Turbo」の構成、必要ファイル、動作の仕組み、プロンプトの書き方、トラブルシューティングをまとめる。
 
@@ -19,7 +19,7 @@ Qwen Image Edit系と同じ`TextEncodeQwenImageEditPlus`ノードで最大3枚�
 | テキストエンコーダ | `qwen3vl_4b_fp8_scaled.safetensors` | `runtime/ComfyUI/models/text_encoders/` | 4.9GB |
 | VAE | `qwen_image_vae.safetensors` | `runtime/ComfyUI/models/vae/` | 0.24GB |
 | 編集用LoRA | `krea2_identity_edit_v1_2.safetensors` | `runtime/ComfyUI/models/loras/` | 1.8GB |
-| 画風参照用LoRA(未使用・任意) | `krea2_style_reference.safetensors` | `runtime/ComfyUI/models/loras/` | 0.46GB |
+| 画風参照用LoRA | `krea2_style_reference.safetensors` | `runtime/ComfyUI/models/loras/` | 0.46GB |
 
 - 拡散モデル・エンコーダ・VAE・style referenceの入手元: [Comfy-Org/Krea-2](https://huggingface.co/Comfy-Org/Krea-2)
 - identity edit LoRAの入手元: [conradlocke/krea2-identity-edit](https://huggingface.co/conradlocke/krea2-identity-edit)
@@ -42,7 +42,7 @@ CLIPLoader(qwen3vl_4b_fp8_scaled, type=krea2) ─ CLIPTextEncode(Input Prompt) �
 EmptyLatentImage → KSampler(euler / simple / 8 steps / CFG 1) → VAEDecode → PreviewImage
 ```
 
-### 画像編集: `workflows/Krea2-Turbo.json`
+### 画像編集(キャラクター維持): `workflows/Krea2-Turbo.json`
 
 ```
 UNETLoader(int8_convrot)
@@ -53,6 +53,10 @@ LoadImage ×3 → TextEncodeQwenImageEditPlus(Input Prompt, clip + vae + image1�
      └ ConditioningZeroOut ────────────────────────────────────┴─ negative
 EmptyLatentImage → KSampler(euler / simple / 8 steps / CFG 1) → VAEDecode → PreviewImage
 ```
+
+### 画風参照: `workflows/Krea2-Turbo-Style.json`
+
+編集ワークフローとグラフ構造は同一で、LoRAだけが`krea2_style_reference.safetensors`(強度1.0)になる。参照画像から**画風だけ**(筆致、質感、配色、ライティング)を取り込み、描く内容はプロンプトで指定する。参照のキャラクターや被写体は出力に引き継がれない。アプリではModel設定の`Krea 2 Turbo (Style)`で選択し、画像未接続の場合は通常のテキスト生成(`Krea2-Turbo-Generate.json`)へフォールバックする。
 
 参照画像は2経路でモデルへ入る。
 
@@ -74,8 +78,17 @@ EmptyLatentImage → KSampler(euler / simple / 8 steps / CFG 1) → VAEDecode �
 
 ### LoRAの選択
 
-- `krea2_identity_edit_v1_2`(採用): 被写体の同一性を保持したまま指示部分だけを編集する。キャラクター合成に適する。
-- `krea2_style_reference`(不採用): 参照画像から**画風だけ**を抽出する。キャラクターは別物になるため、スタイル転写機能を作る場合のみ使う。
+- `krea2_identity_edit_v1_2`(`Krea 2 Turbo`): 被写体の同一性を保持したまま指示部分だけを編集する。キャラクター合成に適する。
+- `krea2_style_reference`(`Krea 2 Turbo (Style)`): 参照画像から**画風だけ**を抽出する。キャラクターは別物になるため、同一性を保ちたい編集には使わない。
+
+アプリのModel設定がこの2つを切り替える。選択中のモデルの使い方は、生成ノードのModel欄の下にTIPSとして常時表示される(文言は`src/main/types.ts`の`GENERATE_MODEL_OPTIONS`)。
+
+## 使い方のTIPS
+
+- **キャラクター合成(`Krea 2 Turbo`)**: 主役キャラをImage 1(=Picture 1)へ接続し、「Picture 1とPicture 2のキャラクターが握手する」のように指示する。同一性をさらに強めたいときは「元の外見・色・模様を保ったまま」を添える。
+- **画風転写(`Krea 2 Turbo (Style)`)**: 画風見本をImageピンへ接続し、Textノードには**描きたい内容だけ**を書く(例: 「夕暮れの屋根の上に座る猫」)。見本のキャラクターは出てこない。配色や質感も見本に寄る。
+- **2段構え**: キャラ合成の結果を次のノードへ繋ぎ、そこでStyleモードにすると「合成したキャラ絵の画風を変える」流れが作れる。
+- 一方のモードで上手くいかないときは、目的を確認する: キャラを残したい→`Krea 2 Turbo`、絵柄だけ真似たい→`Style`。
 
 ## プロンプトの書き方
 

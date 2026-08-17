@@ -662,6 +662,7 @@ function NumberField({
 }
 
 function ModelField({ value, onChange }: { value: GenerateModel; onChange: (value: GenerateModel) => void }): React.JSX.Element {
+  const selected = GENERATE_MODEL_OPTIONS.find((option) => option.value === value)
   return (
     <div className='setting-field model-setting-field'>
       <span>Model</span>
@@ -670,6 +671,7 @@ function ModelField({ value, onChange }: { value: GenerateModel; onChange: (valu
           <option key={option.value} value={option.value}>{option.label}</option>
         ))}
       </select>
+      {selected && <p className='model-tip'>{selected.tip}</p>}
     </div>
   )
 }

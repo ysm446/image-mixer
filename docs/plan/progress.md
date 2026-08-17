@@ -1,7 +1,7 @@
 # 進捗
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-17 15:25
+更新日時: 2026-08-17 16:02
 
 ## 現在の状態
 
@@ -33,6 +33,8 @@ Electron + React Flowの動作版を実装済みです。Text、Image、Image Ge
 - ルートプロジェクトをGitリポジトリとして初期化済み。`runtime/ComfyUI`は独立したGitリポジトリとしてルート側の追跡対象から除外する。
 
 ## 完了済み
+
+- 生成モデルへ`Krea 2 Turbo (Style)`(画風参照)を追加した。`workflows/Krea2-Turbo-Style.json`はキャラ維持編集とグラフ同一でLoRAだけ`krea2_style_reference`に差し替えたもの。Model欄の下へ選択中モデルの使い方TIPS表示(`.model-tip`)を追加し、TIPS文言は`GENERATE_MODEL_OPTIONS`で管理する。画風見本2枚+内容プロンプトの実機確認済み。
 
 - Krea 2編集のブロックノイズの真因を特定し、identity edit構成へ移行した。参照ラテント注入(`FluxKontextMultiReferenceLatentMethod` `index_timestep_zero`)は素のTurboモデルでは機能せず(fp8・int8とも格子ノイズ、`offset`/`index`/`uxo`は参照がそのまま重なる)、対応LoRAを`LoraLoaderModelOnly`(強度1.0)で挟むと正常化する(ComfyUI PR #14843: この方式は編集LoRA用実装)。LoRAは同一性を保持しない`krea2_style_reference.safetensors`(画風転写用)ではなく、`krea2_identity_edit_v1_2.safetensors`(conradlocke/krea2-identity-edit)を使う。現在の編集ワークフローはint8_convrot + identity edit LoRA + 参照ラテント + Qwen3-VL視覚トークン。実行モデルは編集・生成とも`krea2_turbo_int8_convrot.safetensors`へ統一し、モード切替時の12GB再ロードを回避した。
 - Krea 2編集のプロンプトでは参照画像を`Picture 1`〜`Picture 3`と呼ぶ(`TextEncodeQwenImageEditPlus`がこのラベルで視覚トークンを注入するため)。「Picture 1とPicture 2のキャラクターが握手する」のような日本語指示で動作確認済み。
