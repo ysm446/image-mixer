@@ -557,6 +557,29 @@ async function importImage(sourcePath: string, sessionId: string): Promise<Image
   }
 }
 
+async function importClipboardImage(sessionId: string): Promise<ImageAsset | null> {
+  const image = clipboard.readImage()
+  if (image.isEmpty()) return null
+  const png = image.toPNG()
+  const decoded = await imagePreview(png)
+  const destination = join(sessionAssetsDirectory(sessionId), `${randomUUID()}.png`)
+  const destinationKey = assetPathKey(destination)
+  pendingSessionAssets.set(destinationKey, Date.now())
+  try {
+    await mkdir(dirname(destination), { recursive: true })
+    await writeFile(destination, png)
+    return {
+      path: destination,
+      name: 'Clipboard image.png',
+      ...decoded
+    }
+  } catch (error) {
+    pendingSessionAssets.delete(destinationKey)
+    await rm(destination, { force: true })
+    throw error
+  }
+}
+
 async function scanBatchDirectory(inputDirectory: string): Promise<BatchFolderSelection> {
   const directory = resolve(inputDirectory)
   const entries = await readdir(directory, { withFileTypes: true })
@@ -1460,6 +1483,8 @@ function registerIpc(): void {
     return importImage(result.filePaths[0], sessionId)
   })
   ipcMain.handle('image:import', (_event, sourcePath: string, sessionId: string) => importImage(sourcePath, sessionId))
+  ipcMain.handle('image:import-clipboard', (_event, sessionId: string) => importClipboardImage(sessionId))
+  ipcMain.handle('clipboard:mark-node-copy', () => clipboard.writeText('image-mixer:nodes'))
   ipcMain.handle('image:generate', (_event, request: GenerateRequest) => enqueueImageGeneration(request))
   ipcMain.handle('image:cancel-generation', (_event, sessionId: string, nodeId: string) => cancelGeneration(sessionId, nodeId))
   ipcMain.handle('image:copy', (_event, sourcePath: string) => copyImageToClipboard(sourcePath))

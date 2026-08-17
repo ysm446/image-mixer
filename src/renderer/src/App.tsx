@@ -1121,6 +1121,7 @@ function Editor(): React.JSX.Element {
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const renameCommitPending = useRef(false)
   const nodeClipboard = useRef<NodeClipboard | null>(null)
+  const nodeClipboardMarker = useRef<Promise<void> | null>(null)
   const activeSessionIdRef = useRef<string | null>(null)
   const canvasRef = useRef<HTMLElement | null>(null)
   const canceledGenerationIds = useRef(new Set<string>())
@@ -2087,10 +2088,47 @@ function Editor(): React.JSX.Element {
       boundsCenter: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 },
       pasteCount: 0
     }
+    const marker = window.imageMixer.markNodeClipboard().catch(() => undefined)
+    nodeClipboardMarker.current = marker
+    void marker.finally(() => {
+      if (nodeClipboardMarker.current === marker) nodeClipboardMarker.current = null
+    })
     setSidebarError(null)
     showStatusNotice(`${selectedNodes.length}個のノードをコピーしました`)
     return true
   }, [activeSession, edges, nodes, showStatusNotice])
+
+  const pasteClipboardImage = useCallback(async (): Promise<boolean | null> => {
+    if (!activeSession) return false
+    const canvas = canvasRef.current
+    if (!canvas) return false
+    const sessionId = activeSession.id
+    try {
+      if (nodeClipboardMarker.current) await nodeClipboardMarker.current
+      const image = await window.imageMixer.importClipboardImage(sessionId)
+      if (!image) return false
+      if (activeSessionIdRef.current !== sessionId) throw new Error('セッションが切り替わりました。もう一度貼り付けてください。')
+      const canvasRect = canvas.getBoundingClientRect()
+      const position = screenToFlowPosition({
+        x: canvasRect.left + canvasRect.width / 2,
+        y: canvasRect.top + canvasRect.height / 2
+      })
+      setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), {
+        id: `image-${crypto.randomUUID()}`,
+        type: 'editor',
+        position,
+        selected: true,
+        data: { kind: 'image', title: 'Pasted image', image }
+      }])
+      setEdges((current) => current.map((edge) => ({ ...edge, selected: false })))
+      setSidebarError(null)
+      showStatusNotice('クリップボードの画像を貼り付けました')
+      return true
+    } catch (error) {
+      setSidebarError(`画像を貼り付けられませんでした: ${ipcErrorMessage(error)}`)
+      return null
+    }
+  }, [activeSession, screenToFlowPosition, setEdges, setNodes, showStatusNotice])
 
   const pasteSelectedNodes = useCallback(async (): Promise<boolean> => {
     const clipboard = nodeClipboard.current
@@ -2204,14 +2242,15 @@ function Editor(): React.JSX.Element {
         event.preventDefault()
         copySelectedNodes()
       } else if (key === 'v' && !event.repeat) {
-        if (!nodeClipboard.current) return
         event.preventDefault()
-        void pasteSelectedNodes()
+        void pasteClipboardImage().then((pastedImage) => {
+          if (pastedImage === false) void pasteSelectedNodes()
+        })
       }
     }
     window.addEventListener('keydown', handleClipboardShortcut)
     return () => window.removeEventListener('keydown', handleClipboardShortcut)
-  }, [copySelectedNodes, nodes, pasteSelectedNodes, renameTarget])
+  }, [copySelectedNodes, nodes, pasteClipboardImage, pasteSelectedNodes, renameTarget])
 
   useEffect(() => {
     const handleEdgeDeleteShortcut = (event: KeyboardEvent): void => {

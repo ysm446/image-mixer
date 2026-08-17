@@ -38,6 +38,8 @@ const api: ImageMixerApi = {
     if (!sourcePath) return Promise.reject(new Error('Could not resolve the dropped file path'))
     return ipcRenderer.invoke('image:import', sourcePath, sessionId)
   },
+  importClipboardImage: (sessionId) => ipcRenderer.invoke('image:import-clipboard', sessionId),
+  markNodeClipboard: () => ipcRenderer.invoke('clipboard:mark-node-copy'),
   generateImage: (request: GenerateRequest) => ipcRenderer.invoke('image:generate', request),
   cancelGeneration: (sessionId, nodeId) => ipcRenderer.invoke('image:cancel-generation', sessionId, nodeId),
   copyImage: (sourcePath) => ipcRenderer.invoke('image:copy', sourcePath),

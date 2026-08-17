@@ -32,6 +32,8 @@ export interface ImageMixerApi {
   revealBatchOutput(outputDirectory: string): Promise<void>
   chooseImage(sessionId: string): Promise<ImageAsset | null>
   importDroppedImage(file: File, sessionId: string): Promise<ImageAsset>
+  importClipboardImage(sessionId: string): Promise<ImageAsset | null>
+  markNodeClipboard(): Promise<void>
   generateImage(request: GenerateRequest): Promise<GeneratedImage>
   cancelGeneration(sessionId: string, nodeId: string): Promise<boolean>
   copyImage(sourcePath: string): Promise<void>

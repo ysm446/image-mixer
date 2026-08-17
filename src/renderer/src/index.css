@@ -216,13 +216,12 @@ button { color: inherit; }
 .transform-button:disabled { cursor: not-allowed; filter: grayscale(.55); opacity: .48; }
 .node-hint { margin: 8px 0 0; color: #667286; font-size: 9px; }
 .image-picker { position: relative; width: 100%; min-height: 100px; margin-top: 12px; overflow: hidden; border: 1px dashed #3a4b60; border-radius: 10px; background: #0b1118; color: #77889d; }
-.image-picker:hover { border-color: #45b8ff; }
+.image-picker.is-empty:hover { border-color: #45b8ff; }
 .image-picker.has-image { border-style: solid; }
 .image-picker.is-dragging { border-color: #72cbff; background: #102437; box-shadow: inset 0 0 0 2px #45b8ff2e, 0 0 22px #45b8ff1f; }
 .image-picker small { color: #5e7086; font-size: 9px; }
 .image-empty-picker, .image-node-preview { display: grid; width: 100%; height: 100%; place-items: center; border: 0; padding: 0; background: transparent; color: inherit; cursor: pointer; }
 .image-node-preview img { width: 100%; height: 100%; object-fit: contain; }
-.image-node-preview:hover img { filter: brightness(1.06); }
 .image-replace-button { position: absolute; z-index: 2; top: 8px; right: 8px; display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid #4b6075; border-radius: 8px; padding: 0; background: #111b26e8; color: #b8dfff; box-shadow: 0 5px 16px #0009; cursor: pointer; backdrop-filter: blur(5px); }
 .image-replace-button:hover { border-color: #6fc4ff; background: #18293a; color: #e5f5ff; }
 .image-replace-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
