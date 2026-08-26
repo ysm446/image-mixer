@@ -1,7 +1,7 @@
 # 実装計画
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-07 16:39
+更新日時: 2026-08-26 13:51
 
 ## 基本方針
 
@@ -40,7 +40,7 @@ React Flow renderer
           │      └─ models/*.gguf + mmproj*.gguf
           └─ ComfyUI HTTP + WebSocket client
                  └─ runtime/ComfyUI (Python .venv)
-                      └─ Qwen-Rapid-AIO-NSFW-v23.safetensors
+                      └─ D:\ai-models\diffusion\comfyui (comfyModelRoot, extra_model_paths.yaml 経由)
 ```
 
 詳細は [エディタ仕様](../reference/editor-spec.md) と [ComfyUI 連携仕様](../reference/comfyui-integration.md) を参照します。

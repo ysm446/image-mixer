@@ -1,9 +1,13 @@
 # Changelog
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-17 21:29
+更新日時: 2026-08-26 13:51
 
 ## 未リリース
+
+### 2026-08-26 13:51
+
+- ComfyUI のモデル参照先を共有フォルダ(既定 `D:\ai-models\diffusion\comfyui`)へ切り替えた。`data/app-settings.json` の `comfyModelRoot` で変更でき、起動時に `data/comfy-extra-model-paths.yaml` を自動生成して ComfyUI へ渡す。`runtime/ComfyUI/models` にモデルを置かなくても動作する。
 
 ### 2026-08-17 21:29
 

@@ -1,7 +1,7 @@
 # 進捗
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-17 21:29
+更新日時: 2026-08-26 13:51
 
 ## 現在の状態
 
@@ -26,13 +26,16 @@ Electron + React Flowの動作版を実装済みです。Text、Image、Image Ge
 
 ## 判明している差分・注意点
 
-- checkpoint `Qwen-Rapid-AIO-NSFW-v23.safetensors` は `runtime/ComfyUI/models/checkpoints` に配置済みで、APIから認識確認済み。
+- ComfyUI のモデルは共有フォルダ `D:\ai-models\diffusion\comfyui`(`data/app-settings.json` の `comfyModelRoot`、既定値)から読み込む。起動時に `data/comfy-extra-model-paths.yaml` を自動生成し、`--extra-model-paths-config` で渡す。`runtime/ComfyUI/models` にモデルを置く必要はない(置けば併用される)。
+- `.venv/pyvenv.cfg` の `home` は `D:\GenerativeAI\StabilityMatrix\Data\Assets\Python\cpython-3.10.18-windows-x86_64-none` を指す(元の `D:\miniconda3\conda_envs\main` が消えたため 2026-08-26 に付け替え。バックアップは `pyvenv.cfg.bak`)。
 - ワークフローはAPI形式へ置き換え済みで、3つ目の `LoadImage` と `image3` 接続を追加済み。
 - 出力は `PreviewImage` だけである。履歴から取得可能かを smoke test し、安定したファイル管理が必要なら API 版では `SaveImage` を採用する。
 - `package.json`、`.venv`、`.gitignore`、Electronアプリケーションコードを作成済み。
 - ルートプロジェクトをGitリポジトリとして初期化済み。`runtime/ComfyUI`は独立したGitリポジトリとしてルート側の追跡対象から除外する。
 
 ## 完了済み
+
+- ComfyUI のモデル参照先を共有フォルダ `D:\ai-models\diffusion\comfyui` へ切り替えた。`comfyModelRoot` 設定(空文字で無効化)から `extra_model_paths.yaml` を `data/` 配下へ自動生成して `--extra-model-paths-config` で渡す。`krea2_identity_edit_v1_2` と `krea2_style_reference` の LoRA を共有フォルダへコピーし、ローカル `models` を退避した状態で `/object_info` からワークフローが使う6ファイル全てが解決することを確認した。
 
 - 画像読込済みのImageノードへマウスオーバーした際の青い枠と画像の明度変化をなくし、Image Generateノードの結果画像と同じ静かな表示へ揃えた。未読込時とドラッグ中の操作フィードバックは維持する。
 

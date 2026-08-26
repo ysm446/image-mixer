@@ -1,7 +1,7 @@
 # ComfyUI 連携仕様
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-07 05:52
+更新日時: 2026-08-26 13:51
 
 ## 対象
 
@@ -61,7 +61,7 @@ runtime/ComfyUI/models/checkpoints/Qwen/Qwen-Rapid-AIO-NSFW-v23.safetensors
 API input: Qwen\Qwen-Rapid-AIO-NSFW-v23.safetensors
 ```
 
-別の共通 model directory を使う場合は `extra_model_paths.yaml` で明示します。ファイル名を決め打ちするだけでなく、起動後の `/object_info/CheckpointLoaderSimple` から候補に存在することを確認します。
+共通 model directory は `data/app-settings.json` の `comfyModelRoot`(既定 `D:\ai-models\diffusion\comfyui`)で指定します。Electron main は ComfyUI 起動時に `data/comfy-extra-model-paths.yaml` を生成し、`--extra-model-paths-config` で渡します(`is_default: true` なので候補一覧でも先頭に並びます)。`comfyModelRoot` を空文字にすると `runtime/ComfyUI/models` だけを使います。フォルダが存在しない場合は起動せずエラー状態にします。ファイル名を決め打ちするだけでなく、起動後の `/object_info/CheckpointLoaderSimple` から候補に存在することを確認します。
 
 モデルの配布条件、派生元ライセンス、商用利用条件、成人向け生成に関する運用要件は、アプリを第三者へ配布する前に別途確認します。
 
@@ -152,7 +152,7 @@ $pythonPath = Join-Path $venvPath 'Scripts\python.exe'
 ```powershell
 $pythonPath = '.venv\Scripts\python.exe'
 $comfyPath = 'runtime\ComfyUI\main.py'
-& $pythonPath $comfyPath --listen 127.0.0.1 --port 8189
+& $pythonPath $comfyPath --listen 127.0.0.1 --port 8189 --extra-model-paths-config data\comfy-extra-model-paths.yaml
 ```
 
 実際の PyTorch install は GPU、CUDA、driver に依存するため、汎用 requirements の前後どちらで導入するかを smoke test してセットアップスクリプトへ固定します。`.venv/` はバージョン管理対象外です。

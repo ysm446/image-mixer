@@ -12,6 +12,9 @@ import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus
 
 const COMFY_URL = 'http://127.0.0.1:8189'
 const COMFY_PORT = '8189'
+// ComfyUI の共有モデルフォルダ。空文字なら runtime/ComfyUI/models だけを使う。
+const DEFAULT_COMFY_MODEL_ROOT = 'D:\\ai-models\\diffusion\\comfyui'
+let comfyModelRoot = DEFAULT_COMFY_MODEL_ROOT
 
 type CpuSample = Array<{ idle: number; total: number }>
 type GpuInfo = Pick<SystemResources, 'gpuUsage' | 'vramUsed' | 'vramTotal'>
@@ -217,7 +220,8 @@ function rememberLibraryRoot(): void {
 
 async function loadLibraryRoot(): Promise<void> {
   try {
-    const parsed = JSON.parse(await readFile(appSettingsPath(), 'utf8')) as { libraryRoot?: unknown; libraryHistory?: unknown; llm?: Partial<LlmConfig> }
+    const parsed = JSON.parse(await readFile(appSettingsPath(), 'utf8')) as { libraryRoot?: unknown; libraryHistory?: unknown; comfyModelRoot?: unknown; llm?: Partial<LlmConfig> }
+    comfyModelRoot = typeof parsed.comfyModelRoot === 'string' ? parsed.comfyModelRoot.trim() : DEFAULT_COMFY_MODEL_ROOT
     libraryRoot = typeof parsed.libraryRoot === 'string' && parsed.libraryRoot ? resolve(parsed.libraryRoot) : join(dataRoot(), 'library')
     libraryHistory = Array.isArray(parsed.libraryHistory)
       ? parsed.libraryHistory.filter((path): path is string => typeof path === 'string' && path.trim() !== '')
@@ -226,6 +230,7 @@ async function loadLibraryRoot(): Promise<void> {
   } catch {
     libraryRoot = join(dataRoot(), 'library')
     libraryHistory = []
+    comfyModelRoot = DEFAULT_COMFY_MODEL_ROOT
     llmConfig = { ...DEFAULT_LLM_CONFIG }
   }
   rememberLibraryRoot()
@@ -235,7 +240,26 @@ async function loadLibraryRoot(): Promise<void> {
 
 async function saveAppSettings(): Promise<void> {
   await mkdir(dataRoot(), { recursive: true })
-  await writeJsonFile(appSettingsPath(), { libraryRoot, libraryHistory, llm: llmConfig })
+  await writeJsonFile(appSettingsPath(), { libraryRoot, libraryHistory, comfyModelRoot, llm: llmConfig })
+}
+
+// 共有モデルフォルダを ComfyUI に追加検索させる extra_model_paths.yaml を data/ 配下へ生成する。
+// runtime/ComfyUI は Git 管理外なので、設定は data/app-settings.json の comfyModelRoot を正とする。
+async function writeComfyExtraModelPaths(): Promise<string | null> {
+  if (!comfyModelRoot) return null
+  const base = resolve(comfyModelRoot)
+  try {
+    await access(base)
+  } catch {
+    throw new Error(`ComfyUI model folder was not found: ${base}`)
+  }
+  const folders = ['checkpoints', 'configs', 'loras', 'vae', 'text_encoders', 'clip', 'diffusion_models', 'unet', 'clip_vision', 'style_models', 'embeddings', 'diffusers', 'vae_approx', 'controlnet', 't2i_adapter', 'gligen', 'upscale_models', 'latent_upscale_models', 'hypernetworks', 'photomaker', 'classifiers', 'model_patches', 'audio_encoders', 'background_removal', 'frame_interpolation', 'geometry_estimation', 'optical_flow', 'detection']
+  const lines = ['# image-mixer が起動時に自動生成する。変更は data/app-settings.json の comfyModelRoot で行う。', 'image_mixer_shared:', `  base_path: '${base.replace(/'/g, "''")}'`, '  is_default: true']
+  for (const folder of folders) lines.push(`  ${folder}: ${folder}/`)
+  const path = join(dataRoot(), 'comfy-extra-model-paths.yaml')
+  await mkdir(dataRoot(), { recursive: true })
+  await writeFile(path, lines.join('\n') + '\n', 'utf8')
+  return path
 }
 
 function emptySnapshot(): SessionSnapshot {
@@ -804,10 +828,19 @@ async function startComfyUI(): Promise<void> {
   }
 
   setComfyStatus({ phase: 'starting', message: 'Starting ComfyUI…', managed: true })
+  let extraModelPaths: string | null
+  try {
+    extraModelPaths = await writeComfyExtraModelPaths()
+  } catch (error) {
+    setComfyStatus({ phase: 'error', message: error instanceof Error ? error.message : String(error), managed: false })
+    return
+  }
   await mkdir(join(dataRoot(), 'logs'), { recursive: true })
   const log = createWriteStream(join(dataRoot(), 'logs', 'comfyui.log'), { flags: 'a' })
 
-  const child = spawn(pythonPath, [comfyMain, '--listen', '127.0.0.1', '--port', COMFY_PORT], {
+  const comfyArgs = [comfyMain, '--listen', '127.0.0.1', '--port', COMFY_PORT]
+  if (extraModelPaths) comfyArgs.push('--extra-model-paths-config', extraModelPaths)
+  const child = spawn(pythonPath, comfyArgs, {
     cwd: comfyCwd,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe']
