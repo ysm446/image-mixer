@@ -10,6 +10,7 @@ export interface ImageMixerApi {
   rescanLlm(): Promise<LlmStatus>
   updateLlmConfig(patch: Partial<LlmConfig>): Promise<LlmStatus>
   revealLlmLocation(location: 'models' | 'server' | 'logs'): Promise<void>
+  chooseLlmModelsDir(): Promise<string | null>
   startImageDescription(request: ImageDescribeRequest): Promise<void>
   cancelImageDescription(descriptionId: string): Promise<boolean>
   startTextTransform(request: TextTransformRequest): Promise<void>

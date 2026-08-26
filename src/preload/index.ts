@@ -12,6 +12,7 @@ const api: ImageMixerApi = {
   rescanLlm: () => ipcRenderer.invoke('llm:rescan'),
   updateLlmConfig: (patch: Partial<LlmConfig>) => ipcRenderer.invoke('llm:update-config', patch),
   revealLlmLocation: (location) => ipcRenderer.invoke('llm:reveal', location),
+  chooseLlmModelsDir: () => ipcRenderer.invoke('llm:choose-models-dir'),
   startImageDescription: (request: ImageDescribeRequest) => ipcRenderer.invoke('llm:image-describe', request),
   cancelImageDescription: (descriptionId) => ipcRenderer.invoke('llm:image-describe-cancel', descriptionId),
   startTextTransform: (request: TextTransformRequest) => ipcRenderer.invoke('llm:text-transform', request),

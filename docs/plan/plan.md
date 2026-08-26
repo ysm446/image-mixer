@@ -1,14 +1,14 @@
 # 実装計画
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-26 13:51
+更新日時: 2026-08-26 14:40
 
 ## 基本方針
 
 - UI は [ysm446/lm-graph](https://github.com/ysm446/lm-graph) を参考に Electron + React + TypeScript + React Flow で構築する。
 - renderer からローカルファイルや ComfyUI へ直接アクセスせず、preload の型付き IPC を介して Electron main に処理を集約する。
 - Electron main が ComfyUI プロセス、HTTP API、WebSocket、画像ファイル、プロジェクト DB を管理する。
-- Local LLMは`models/`のGGUFと同じフォルダの`mmproj`を検出し、Electron mainが`runtime/llama-server/`のプロセスを管理する。
+- Local LLMは`models/`(設定 `llm.modelsDir` で変更可)のGGUFと同じフォルダの`mmproj`を検出し、Electron mainが`runtime/llama-server/`のプロセスを管理する。
 - Electronのsingle-instance lockを使い、アプリとComfyUIの管理主体が二重にならないようにする。2回目の起動要求では既存ウィンドウを前面表示する。
 - Python はリポジトリ直下の `.venv/` を使用し、`runtime/ComfyUI/main.py` を同環境から起動する。MVP では独自の常駐 Python API サーバーを増やさない。
 - 現在のMVPでは、選択したルートフォルダの `sessions/<session-id>/session.json` にグラフを保存し、画像本体は同セッションの `assets/` にコピーする。SQLiteへの移行は履歴・検索要件が増えた段階で再検討する。

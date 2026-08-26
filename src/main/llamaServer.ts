@@ -6,8 +6,12 @@ import type { LlmConfig, LlmModelOption, LlmStatus } from './types'
 
 const DEFAULT_PORT = 8190
 
+const MAX_RECENT_MODELS = 20
+
 export const DEFAULT_LLM_CONFIG: LlmConfig = {
+  modelsDir: '',
   selectedModelPath: '',
+  recentModelPaths: [],
   contextLength: 8192,
   temperature: 0.3,
   maxTokens: 1024,
@@ -49,6 +53,7 @@ export class LlamaServerManager {
       models,
       config: { ...this.config },
       loadedModelPath: this.loadedModelPath,
+      modelsDir: this.resolveModelsDir(),
       serverPath,
       activePort: this.activePort,
       restartRequired: this.restartRequired
@@ -74,6 +79,7 @@ export class LlamaServerManager {
     const previous = this.config
     this.config = normalizeConfig({ ...this.config, ...patch })
     this.ensureSelectedModel()
+    if (this.config.selectedModelPath && this.config.selectedModelPath !== previous.selectedModelPath) this.rememberSelectedModel()
     if (this.phase === 'ready') {
       this.restartRequired = runtimeConfigChanged(previous, this.config) || this.loadedModelPath !== this.config.selectedModelPath
       this.message = this.restartRequired ? '設定を反映するには再ロードしてください' : 'Local LLM is ready'
@@ -91,7 +97,8 @@ export class LlamaServerManager {
     const serverPath = findServerPath(this.rootDir)
     if (!serverPath) return this.fail('runtime/llama-server に llama-server.exe が見つかりません')
     const model = this.listModels().find((entry) => resolve(entry.path) === resolve(this.config.selectedModelPath))
-    if (!model) return this.fail('models/ にロード可能なGGUFモデルが見つかりません')
+    if (!model) return this.fail(`${this.resolveModelsDir()} にロード可能なGGUFモデルが見つかりません`)
+    this.rememberSelectedModel()
 
     if (this.process) await this.stop()
     this.phase = 'loading'
@@ -189,8 +196,18 @@ export class LlamaServerManager {
     return this.emit()
   }
 
+  resolveModelsDir(): string {
+    return this.config.modelsDir ? resolve(this.config.modelsDir) : join(this.rootDir, 'models')
+  }
+
+  private rememberSelectedModel(): void {
+    const selected = this.config.selectedModelPath
+    if (!selected) return
+    this.config.recentModelPaths = [selected, ...this.config.recentModelPaths.filter((path) => !samePath(path, selected))].slice(0, MAX_RECENT_MODELS)
+  }
+
   private listModels(): LlmModelOption[] {
-    const modelsDir = join(this.rootDir, 'models')
+    const modelsDir = this.resolveModelsDir()
     if (!existsSync(modelsDir)) return []
     return walkFiles(modelsDir)
       .filter((file) => file.toLowerCase().endsWith('.gguf') && !/mmproj/i.test(basename(file)))
@@ -205,8 +222,10 @@ export class LlamaServerManager {
 
   private ensureSelectedModel(): void {
     const models = this.listModels()
-    if (!models.some((model) => resolve(model.path) === resolve(this.config.selectedModelPath))) {
-      this.config.selectedModelPath = models[0]?.path ?? ''
+    if (!models.some((model) => samePath(model.path, this.config.selectedModelPath))) {
+      // 選択中のモデルが無ければ、選択履歴の新しい順に存在するものを優先し、無ければ先頭のモデルへ戻す
+      const recent = this.config.recentModelPaths.find((path) => models.some((model) => samePath(model.path, path)))
+      this.config.selectedModelPath = recent ?? models[0]?.path ?? ''
     }
   }
 
@@ -246,7 +265,11 @@ export class LlamaServerManager {
 
 function normalizeConfig(input: Partial<LlmConfig>): LlmConfig {
   return {
+    modelsDir: typeof input.modelsDir === 'string' ? input.modelsDir.trim() : '',
     selectedModelPath: typeof input.selectedModelPath === 'string' ? input.selectedModelPath : '',
+    recentModelPaths: Array.isArray(input.recentModelPaths)
+      ? input.recentModelPaths.filter((path): path is string => typeof path === 'string' && path.trim() !== '').slice(0, MAX_RECENT_MODELS)
+      : [],
     contextLength: clampInteger(input.contextLength, 512, 262144, DEFAULT_LLM_CONFIG.contextLength),
     temperature: clampNumber(input.temperature, 0, 2, DEFAULT_LLM_CONFIG.temperature),
     maxTokens: clampInteger(input.maxTokens, 1, 32768, DEFAULT_LLM_CONFIG.maxTokens),
@@ -264,6 +287,10 @@ function runtimeConfigChanged(left: LlmConfig, right: LlmConfig): boolean {
     left.gpuLayers !== right.gpuLayers ||
     left.flashAttention !== right.flashAttention ||
     left.mmprojOffload !== right.mmprojOffload
+}
+
+function samePath(left: string, right: string): boolean {
+  return left !== '' && right !== '' && resolve(left).toLowerCase() === resolve(right).toLowerCase()
 }
 
 function clampInteger(value: unknown, min: number, max: number, fallback: number): number {

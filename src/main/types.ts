@@ -20,7 +20,11 @@ export interface LlmModelOption {
 }
 
 export interface LlmConfig {
+  /** GGUFモデルの検索フォルダ。空文字ならプロジェクト直下の models/ を使う */
+  modelsDir: string
   selectedModelPath: string
+  /** 選択履歴(新しい順)。モデル選択ウインドウの並び順に使う */
+  recentModelPaths: string[]
   contextLength: number
   temperature: number
   maxTokens: number
@@ -37,6 +41,8 @@ export interface LlmStatus {
   models: LlmModelOption[]
   config: LlmConfig
   loadedModelPath: string | null
+  /** 実際にスキャンしているモデルフォルダの絶対パス */
+  modelsDir: string
   serverPath: string | null
   activePort: number | null
   restartRequired: boolean

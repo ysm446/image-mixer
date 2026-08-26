@@ -766,7 +766,7 @@ function getLlamaServer(): LlamaServerManager {
 
 async function revealLlmLocation(location: 'models' | 'server' | 'logs'): Promise<void> {
   const target = location === 'models'
-    ? join(projectRoot(), 'models')
+    ? getLlamaServer().resolveModelsDir()
     : location === 'server'
       ? join(projectRoot(), 'runtime', 'llama-server')
       : join(dataRoot(), 'logs')
@@ -1448,6 +1448,11 @@ function registerIpc(): void {
     return status
   })
   ipcMain.handle('llm:reveal', (_event, location: 'models' | 'server' | 'logs') => revealLlmLocation(location))
+  ipcMain.handle('llm:choose-models-dir', async (): Promise<string | null> => {
+    const options = { title: 'GGUFモデルのフォルダを選択', defaultPath: getLlamaServer().resolveModelsDir(), properties: ['openDirectory' as const] }
+    const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
   ipcMain.handle('llm:image-describe', (event, request: ImageDescribeRequest): void => {
     if (imageDescriptionControllers.has(request.descriptionId)) throw new Error('Image Describeはすでに実行中です')
     void streamImageDescription(event.sender, request)

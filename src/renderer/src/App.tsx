@@ -43,7 +43,9 @@ const EMPTY_LLM_STATUS: LlmStatus = {
   managed: false,
   models: [],
   config: {
+    modelsDir: '',
     selectedModelPath: '',
+    recentModelPaths: [],
     contextLength: 8192,
     temperature: 0.3,
     maxTokens: 1024,
@@ -53,6 +55,7 @@ const EMPTY_LLM_STATUS: LlmStatus = {
     mmprojOffload: true
   },
   loadedModelPath: null,
+  modelsDir: '',
   serverPath: null,
   activePort: null,
   restartRequired: false
@@ -1301,6 +1304,15 @@ function Editor(): React.JSX.Element {
       setLlmSettingsError(ipcErrorMessage(error))
     }
   }, [llmSettingsDraft])
+
+  const chooseLlmModelsDir = useCallback(async (): Promise<void> => {
+    try {
+      const modelsDir = await window.imageMixer.chooseLlmModelsDir()
+      if (modelsDir) setLlmSettingsDraft((current) => ({ ...current, modelsDir }))
+    } catch (error) {
+      setLlmSettingsError(ipcErrorMessage(error))
+    }
+  }, [])
 
   const rescanLlm = useCallback(async (): Promise<void> => {
     try {
@@ -2592,6 +2604,13 @@ function Editor(): React.JSX.Element {
     return { title: runningNode.data.title, percent, queuedCount }
   }, [generationProgress, nodes])
   const selectedLlmModel = llm.models.find((model) => model.path === llm.config.selectedModelPath) ?? null
+  // モデル選択ウインドウは「以前選択したもの」を新しい順に先頭へ置き、残りは名前順にする
+  const pickerModels = useMemo(() => {
+    const rank = new Map(llm.config.recentModelPaths.map((path, index) => [path.toLowerCase(), index]))
+    const recent = llm.models.filter((model) => rank.has(model.path.toLowerCase())).sort((left, right) => rank.get(left.path.toLowerCase())! - rank.get(right.path.toLowerCase())!)
+    const others = llm.models.filter((model) => !rank.has(model.path.toLowerCase()))
+    return [...recent, ...others]
+  }, [llm.config.recentModelPaths, llm.models])
   const loadedLlmModel = llm.models.find((model) => model.path === llm.loadedModelPath) ?? null
   const llmBusy = llmTogglePending || llm.phase === 'loading' || llm.phase === 'unloading'
   const llmLoaded = llm.phase === 'ready' && !llm.restartRequired && loadedLlmModel != null
@@ -2898,7 +2917,7 @@ function Editor(): React.JSX.Element {
                 <button type='button' className='llm-dialog-close' aria-label='閉じる' onClick={() => setLlmModelPickerOpen(false)}>×</button>
               </header>
               <div className='llm-model-picker-list'>
-                {llm.models.map((model) => {
+                {pickerModels.map((model) => {
                   const loaded = llmLoaded && model.path === llm.loadedModelPath
                   const selected = model.path === llm.config.selectedModelPath
                   return (
@@ -2909,7 +2928,7 @@ function Editor(): React.JSX.Element {
                     </button>
                   )
                 })}
-                {llm.models.length === 0 && <div className='llm-model-picker-empty'><strong>GGUFモデルがありません</strong><span>models/フォルダへモデルを追加し、設定画面から再スキャンしてください。</span></div>}
+                {llm.models.length === 0 && <div className='llm-model-picker-empty'><strong>GGUFモデルがありません</strong><span title={llm.modelsDir}>{llm.modelsDir || 'models/'} へモデルを追加し、設定画面から再スキャンしてください。</span></div>}
               </div>
               {llmModelPickerError && <div className='llm-settings-error'>{llmModelPickerError}</div>}
               <footer><span>{llm.message}</span><button type='button' onClick={openLlmSettings}>詳細設定</button></footer>
@@ -2939,6 +2958,13 @@ function Editor(): React.JSX.Element {
                     {llm.models.length === 0 && <option value=''>GGUFモデルがありません</option>}
                     {llm.models.map((model) => <option key={model.path} value={model.path}>{model.name} ({formatModelSize(model.sizeBytes)})</option>)}
                   </select>
+                </label>
+                <label className='llm-settings-field llm-settings-wide'>
+                  <span>Modelsフォルダ（空欄で既定の models/）</span>
+                  <div className='llm-settings-path'>
+                    <input type='text' value={llmSettingsDraft.modelsDir} placeholder={llm.modelsDir || 'models/'} spellCheck={false} onChange={(event) => setLlmSettingsDraft((current) => ({ ...current, modelsDir: event.target.value }))} />
+                    <button type='button' onClick={() => void chooseLlmModelsDir()}>参照</button>
+                  </div>
                 </label>
                 <div className='llm-path-summary llm-settings-wide'>
                   <span className={llm.serverPath ? 'available' : 'missing'}>{llm.serverPath ? 'llama-server 検出済み' : 'llama-server が見つかりません'}</span>

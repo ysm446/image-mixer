@@ -1,7 +1,7 @@
 # 進捗
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-26 13:51
+更新日時: 2026-08-26 14:40
 
 ## 現在の状態
 
@@ -34,6 +34,8 @@ Electron + React Flowの動作版を実装済みです。Text、Image、Image Ge
 - ルートプロジェクトをGitリポジトリとして初期化済み。`runtime/ComfyUI`は独立したGitリポジトリとしてルート側の追跡対象から除外する。
 
 ## 完了済み
+
+- Local LLM の GGUF モデルフォルダを `llm.modelsDir`(空文字で既定の `models/`)で設定できるようにし、設定画面へフォルダ指定欄と参照ボタンを追加した。モデル選択ウインドウは `llm.recentModelPaths`(選択履歴、最大20件)を新しい順に先頭へ並べ、残りは名前順にする。
 
 - ComfyUI のモデル参照先を共有フォルダ `D:\ai-models\diffusion\comfyui` へ切り替えた。`comfyModelRoot` 設定(空文字で無効化)から `extra_model_paths.yaml` を `data/` 配下へ自動生成して `--extra-model-paths-config` で渡す。`krea2_identity_edit_v1_2` と `krea2_style_reference` の LoRA を共有フォルダへコピーし、ローカル `models` を退避した状態で `/object_info` からワークフローが使う6ファイル全てが解決することを確認した。
 
