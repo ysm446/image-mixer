@@ -112,14 +112,15 @@ export interface ImageAsset {
   height: number
 }
 
-export type GenerateModel = 'qwen' | 'krea2' | 'krea2-style'
+export type GenerateModel = 'qwen' | 'krea2' | 'krea2-style' | 'qwen21'
 
 export const DEFAULT_GENERATE_MODEL: GenerateModel = 'qwen'
 
 export const GENERATE_MODEL_OPTIONS: ReadonlyArray<{ value: GenerateModel; label: string; defaultSteps: number; tip: string }> = [
   { value: 'qwen', label: 'Qwen Rapid AIO', defaultSteps: 4, tip: '参照画像を最大3枚接続し、編集指示で合成・編集します。' },
   { value: 'krea2', label: 'Krea 2 Turbo', defaultSteps: 8, tip: '参照キャラクターの見た目を保って編集します。プロンプトでは参照画像をPicture 1〜3と呼びます(例: Picture 1とPicture 2のキャラクターが握手する)。' },
-  { value: 'krea2-style', label: 'Krea 2 Turbo (Style)', defaultSteps: 8, tip: '参照画像は画風の見本として使います。描きたい内容はTextノードに書きます。参照のキャラクターは引き継がれません。' }
+  { value: 'krea2-style', label: 'Krea 2 Turbo (Style)', defaultSteps: 8, tip: '参照画像は画風の見本として使います。描きたい内容はTextノードに書きます。参照のキャラクターは引き継がれません。' },
+  { value: 'qwen21', label: 'Qwen Image 2.1', defaultSteps: 25, tip: '生成と編集を1つのモデルで行います。プロンプトでは参照画像を<image1>〜<image3>と呼びます(例: <image2>のシャツを<image1>の人物に着せる)。編集結果はImage 1の縦横比になり、Width×Heightは画素数の目安として使われます。' }
 ]
 
 export interface GenerateSettings {

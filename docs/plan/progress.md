@@ -1,7 +1,7 @@
 # 進捗
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-26 14:40
+更新日時: 2026-09-23 02:29
 
 ## 現在の状態
 
@@ -34,6 +34,8 @@ Electron + React Flowの動作版を実装済みです。Text、Image、Image Ge
 - ルートプロジェクトをGitリポジトリとして初期化済み。`runtime/ComfyUI`は独立したGitリポジトリとしてルート側の追跡対象から除外する。
 
 ## 完了済み
+
+- 生成モデルへ`Qwen Image 2.1`(`qwen21`)を追加した。同梱ComfyUIを0.30.0からv0.37.0へ更新し(`.venv`のrequirementsも更新、ComfyUI内部のアセットDBは移行され旧DBは`runtime/ComfyUI/user/comfyui.db.bkp`)、モデル一式(int8 convrot拡散モデル、Qwen3-VL-8B int8エンコーダ、専用VAE)を共有フォルダへ配置した。編集ワークフローは公式どおり`TextEncodeQwenImage21`のlatent出力でサンプリングする。`EmptyLatentImage`をWidth × Heightで使うとImage 1の縮小サイズとずれ、seedによってはプロンプトを無視した過剰シャープ出力になることを実測で確認したため。固定seedのsmoke test(t2i 3件、参照1枚・2枚の編集、既存Qwen Rapid AIO・Krea 2の回帰)で出力を目視確認済み。詳細は [docs/reference/qwen-image-2.1.md](../reference/qwen-image-2.1.md)。
 
 - Local LLM の GGUF モデルフォルダを `llm.modelsDir`(空文字で既定の `models/`)で設定できるようにし、設定画面へフォルダ指定欄と参照ボタンを追加した。モデル選択ウインドウは `llm.recentModelPaths`(選択履歴、最大20件)を新しい順に先頭へ並べ、残りは名前順にする。
 

@@ -43,6 +43,8 @@ ComfyUIの内部ワークフローを直接編集するのではなく、素材�
 - ComfyUI node: `TextEncodeQwenImageEditPlus`
 - ComfyUI address: `127.0.0.1:8189`
 
+Model設定ではKrea 2 Turbo([docs/reference/krea2.md](docs/reference/krea2.md))とQwen Image 2.1([docs/reference/qwen-image-2.1.md](docs/reference/qwen-image-2.1.md)、ComfyUI 0.37.0以降が必要)も選べます。
+
 ワークフローはComfyUIのAPI形式です。画面保存形式のJSONはそのまま実行できません。ComfyUIで編集した場合は、`Export (API)`で保存した内容に置き換えてください。
 
 ## 必要環境
@@ -55,7 +57,7 @@ ComfyUIの内部ワークフローを直接編集するのではなく、素材�
 - `.venv`のPython仮想環境
 - 指定checkpoint
 
-動作確認済みのローカル環境はPython 3.10.19、PyTorch 2.10.0 + CUDA 13.0、ComfyUI 0.30.0です。GPUやドライバーによって適切なPyTorch構成は異なります。
+動作確認済みのローカル環境はPython 3.10.19、PyTorch 2.10.0 + CUDA 13.0、ComfyUI 0.37.0です。GPUやドライバーによって適切なPyTorch構成は異なります。
 
 ## ディレクトリ構成
 

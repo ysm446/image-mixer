@@ -1,9 +1,16 @@
 # Changelog
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-08-26 14:40
+更新日時: 2026-09-23 02:29
 
 ## 未リリース
+
+### 2026-09-23 02:29
+
+- 生成モデルに`Qwen Image 2.1`を追加した。1つのモデルでテキスト生成と画像編集(参照画像最大3枚)を行う(`workflows/Qwen-Image-2.1-Generate.json` / `workflows/Qwen-Image-2.1.json`)。プロンプトでは参照画像を`<image1>`〜`<image3>`と呼ぶ。既定Stepsは25。
+- 編集時の出力はImage 1の縦横比になり、Width × Heightは画素数の目安として使う(公式テンプレートと同じく、エンコーダが返すImage 1サイズのlatentでサンプリングする)。
+- 同梱ComfyUIを0.30.0からv0.37.0へ更新した(Qwen Image 2.1対応のため)。Qwen Rapid AIO・Krea 2の生成・編集が引き続き動作することを確認済み。
+- 仕様書 [docs/reference/qwen-image-2.1.md](reference/qwen-image-2.1.md) を追加した。
 
 ### 2026-08-26 14:40
 
