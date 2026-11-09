@@ -1,9 +1,13 @@
-import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationProgressEvent, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from '../main/types'
+import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, ComfyUpdateState, ComfyVersionInfo, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationProgressEvent, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from '../main/types'
 
 export interface ImageMixerApi {
   getComfyStatus(): Promise<ComfyStatus>
   startComfyUI(): Promise<ComfyStatus>
   stopComfyUI(): Promise<ComfyStatus>
+  getComfyVersionInfo(): Promise<ComfyVersionInfo>
+  checkComfyUpdates(): Promise<ComfyVersionInfo>
+  updateComfyUI(tag: string): Promise<ComfyVersionInfo>
+  getComfyUpdateState(): Promise<ComfyUpdateState>
   getLlmStatus(): Promise<LlmStatus>
   loadLlm(): Promise<LlmStatus>
   unloadLlm(): Promise<LlmStatus>
@@ -42,6 +46,7 @@ export interface ImageMixerApi {
   captureScreenshot(): Promise<string>
   revealScreenshot(sourcePath: string): Promise<void>
   onComfyStatus(callback: (status: ComfyStatus) => void): () => void
+  onComfyUpdateState(callback: (state: ComfyUpdateState) => void): () => void
   onLlmStatus(callback: (status: LlmStatus) => void): () => void
   onImageDescriptionDelta(callback: (event: ImageDescribeStreamEvent) => void): () => void
   onImageDescriptionDone(callback: (event: ImageDescribeStreamEvent) => void): () => void

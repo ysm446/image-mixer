@@ -348,6 +348,18 @@ button { color: inherit; }
 .llm-settings-dialog > footer > div { display: flex; flex: none; gap: 7px; }
 .llm-settings-dialog > footer button.primary { border-color: #39739a; background: #245f86; color: #eff9ff; }
 .llm-settings-dialog > footer button.primary:hover { background: #2c739f; }
+.comfy-version-summary { flex-wrap: wrap; margin: 0 0 12px; font-variant-numeric: tabular-nums; }
+.comfy-target-field { max-width: 260px; }
+.comfy-target-field select:disabled { opacity: .6; }
+.llm-folder-actions button.primary { border-color: #39739a; background: #245f86; color: #eff9ff; }
+.llm-folder-actions button.primary:hover { background: #2c739f; }
+.llm-folder-actions button:disabled { cursor: not-allowed; filter: grayscale(.6); opacity: .5; }
+.comfy-update-message { color: #aab6c5; }
+.comfy-update-message.updating, .comfy-update-message.checking { color: #f6bd60; }
+.comfy-update-message.done { color: #7fe1aa; }
+.comfy-update-message.error { color: #ff9aa1; }
+.comfy-update-log { max-height: 180px; margin: 10px 0 0; overflow: auto; border: 1px solid #344052; border-radius: 8px; padding: 9px 10px; background: #0b1118; color: #aab6c5; font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace; font-size: 9px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; scrollbar-color: #4e5968 transparent; scrollbar-width: thin; }
+.comfy-update-error { margin-top: 10px; }
 .result-placeholder { color: #566174; font-size: 11px; }
 .result-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 5px; opacity: .78; transition: opacity .15s ease; }
 .result-frame:hover .result-actions { opacity: 1; }

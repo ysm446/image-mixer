@@ -1,11 +1,15 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import type { BatchManifest, ComfyStatus, GenerateRequest, GenerationProgressEvent, GenerationStartedEvent, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LlmConfig, LlmStatus, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from '../main/types'
+import type { BatchManifest, ComfyStatus, ComfyUpdateState, GenerateRequest, GenerationProgressEvent, GenerationStartedEvent, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LlmConfig, LlmStatus, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from '../main/types'
 import type { ImageMixerApi } from './bridge'
 
 const api: ImageMixerApi = {
   getComfyStatus: () => ipcRenderer.invoke('comfy:status'),
   startComfyUI: () => ipcRenderer.invoke('comfy:start'),
   stopComfyUI: () => ipcRenderer.invoke('comfy:stop'),
+  getComfyVersionInfo: () => ipcRenderer.invoke('comfy:version-info'),
+  checkComfyUpdates: () => ipcRenderer.invoke('comfy:check-updates'),
+  updateComfyUI: (tag) => ipcRenderer.invoke('comfy:update', tag),
+  getComfyUpdateState: () => ipcRenderer.invoke('comfy:update-state'),
   getLlmStatus: () => ipcRenderer.invoke('llm:status'),
   loadLlm: () => ipcRenderer.invoke('llm:load'),
   unloadLlm: () => ipcRenderer.invoke('llm:stop'),
@@ -51,6 +55,11 @@ const api: ImageMixerApi = {
     const listener = (_event: IpcRendererEvent, status: ComfyStatus): void => callback(status)
     ipcRenderer.on('comfy:status-changed', listener)
     return () => ipcRenderer.off('comfy:status-changed', listener)
+  },
+  onComfyUpdateState: (callback) => {
+    const listener = (_event: IpcRendererEvent, state: ComfyUpdateState): void => callback(state)
+    ipcRenderer.on('comfy:update-state-changed', listener)
+    return () => ipcRenderer.off('comfy:update-state-changed', listener)
   },
   onLlmStatus: (callback) => {
     const listener = (_event: IpcRendererEvent, status: LlmStatus): void => callback(status)

@@ -20,7 +20,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { DEFAULT_GENERATE_MODEL, DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT, DEFAULT_TEXT_TRANSFORM_SYSTEM_PROMPT, GENERATE_MODEL_OPTIONS } from '../../main/types'
-import type { BatchFolderSelection, BatchManifest, BatchManifestItem, ComfyStatus, GeneratedImage, GenerateModel, GenerateSettings, GenerationProgressEvent, ImageAsset, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SessionViewport } from '../../main/types'
+import type { BatchFolderSelection, BatchManifest, BatchManifestItem, ComfyStatus, ComfyUpdateState, ComfyVersionInfo, GeneratedImage, GenerateModel, GenerateSettings, GenerationProgressEvent, ImageAsset, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SessionViewport } from '../../main/types'
 import { SystemResourceMonitor } from './SystemResourceMonitor'
 
 type RenderState = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
@@ -1088,7 +1088,12 @@ function Editor(): React.JSX.Element {
   const [llmSettingsOpen, setLlmSettingsOpen] = useState(false)
   const [llmSettingsDraft, setLlmSettingsDraft] = useState<LlmConfig>(EMPTY_LLM_STATUS.config)
   const [llmSettingsError, setLlmSettingsError] = useState<string | null>(null)
-  const [settingsTab, setSettingsTab] = useState<'llm' | 'display'>('llm')
+  const [settingsTab, setSettingsTab] = useState<'llm' | 'comfy' | 'display'>('llm')
+  const [comfyVersion, setComfyVersion] = useState<ComfyVersionInfo | null>(null)
+  const [comfyUpdate, setComfyUpdate] = useState<ComfyUpdateState>({ phase: 'idle', message: '', targetTag: null, log: [] })
+  const [comfyTargetTag, setComfyTargetTag] = useState('')
+  const [comfyVersionError, setComfyVersionError] = useState<string | null>(null)
+  const comfyUpdateLogRef = useRef<HTMLPreElement | null>(null)
   const [showMinimap, setShowMinimap] = useState(() => window.localStorage.getItem(MINIMAP_STORAGE_KEY) !== '0')
   const [snapToGrid, setSnapToGrid] = useState(() => window.localStorage.getItem(SNAP_TO_GRID_STORAGE_KEY) === '1')
   const [showDots, setShowDots] = useState(() => window.localStorage.getItem(DOTS_STORAGE_KEY) !== '0')
@@ -1276,6 +1281,47 @@ function Editor(): React.JSX.Element {
     setSettingsTab('llm')
     setLlmSettingsOpen(true)
   }, [llm.config])
+
+  const applyComfyVersion = useCallback((info: ComfyVersionInfo): void => {
+    setComfyVersion(info)
+    setComfyTargetTag((current) => current && info.tags.includes(current) ? current : info.latest ?? '')
+  }, [])
+
+  useEffect(() => {
+    void window.imageMixer.getComfyUpdateState().then(setComfyUpdate)
+    return window.imageMixer.onComfyUpdateState(setComfyUpdate)
+  }, [])
+
+  useEffect(() => {
+    if (!llmSettingsOpen || settingsTab !== 'comfy') return
+    setComfyVersionError(null)
+    window.imageMixer.getComfyVersionInfo().then(applyComfyVersion).catch((error: unknown) => setComfyVersionError(ipcErrorMessage(error)))
+  }, [applyComfyVersion, llmSettingsOpen, settingsTab])
+
+  useEffect(() => {
+    const log = comfyUpdateLogRef.current
+    if (log) log.scrollTop = log.scrollHeight
+  }, [comfyUpdate.log])
+
+  const checkComfyUpdates = useCallback(async (): Promise<void> => {
+    try {
+      setComfyVersionError(null)
+      applyComfyVersion(await window.imageMixer.checkComfyUpdates())
+    } catch (error) {
+      setComfyVersionError(ipcErrorMessage(error))
+    }
+  }, [applyComfyVersion])
+
+  const runComfyUpdate = useCallback(async (): Promise<void> => {
+    if (!comfyTargetTag) return
+    try {
+      setComfyVersionError(null)
+      applyComfyVersion(await window.imageMixer.updateComfyUI(comfyTargetTag))
+    } catch (error) {
+      setComfyVersionError(ipcErrorMessage(error))
+      window.imageMixer.getComfyVersionInfo().then(applyComfyVersion).catch(() => undefined)
+    }
+  }, [applyComfyVersion, comfyTargetTag])
 
   const toggleMinimap = useCallback((visible: boolean): void => {
     setShowMinimap(visible)
@@ -2946,6 +2992,7 @@ function Editor(): React.JSX.Element {
               <div className='llm-settings-body'>
                 <nav className='llm-settings-nav' aria-label='設定セクション'>
                   <button type='button' className={settingsTab === 'llm' ? 'active' : ''} onClick={() => setSettingsTab('llm')}>Local LLM</button>
+                  <button type='button' className={settingsTab === 'comfy' ? 'active' : ''} onClick={() => setSettingsTab('comfy')}>ComfyUI</button>
                   <button type='button' className={settingsTab === 'display' ? 'active' : ''} onClick={() => setSettingsTab('display')}>表示</button>
                 </nav>
                 <div className='llm-settings-panel'>
@@ -2995,6 +3042,45 @@ function Editor(): React.JSX.Element {
                 </div>
               </section>
                   </>)}
+                  {settingsTab === 'comfy' && (() => {
+                    const busy = comfyUpdate.phase === 'checking' || comfyUpdate.phase === 'updating'
+                    const isCurrentTarget = Boolean(comfyVersion?.currentIsTag && comfyVersion.current === comfyTargetTag)
+                    const updateDisabledReason = busy
+                      ? '更新処理が実行中です'
+                      : comfyVersion?.dirty
+                        ? 'runtime/ComfyUI に未コミットの変更があります'
+                        : !comfyTargetTag
+                          ? '「更新を確認」でバージョン一覧を取得してください'
+                          : isCurrentTarget
+                            ? '現在のバージョンです'
+                            : ''
+                    return (
+                      <section className='llm-settings-section'>
+                        <div className='llm-settings-section-title'>バージョン</div>
+                        <div className='llm-path-summary comfy-version-summary'>
+                          <span className={comfyVersion?.current ? 'available' : 'missing'}>現在 {comfyVersion?.current ?? '不明'}{comfyVersion?.commit ? ` (${comfyVersion.commit})` : ''}</span>
+                          <span className={comfyVersion?.checkedAt && comfyVersion.latest ? 'available' : ''}>最新 {comfyVersion?.checkedAt ? comfyVersion.latest ?? 'なし' : '未確認'}</span>
+                          {comfyVersion?.dirty && <span className='missing'>未コミットの変更あり</span>}
+                        </div>
+                        <label className='llm-settings-field comfy-target-field'>
+                          <span>切り替え先</span>
+                          <select value={comfyTargetTag} disabled={busy || !comfyVersion?.tags.length} onChange={(event) => setComfyTargetTag(event.target.value)}>
+                            {!comfyVersion?.tags.length && <option value=''>タグがありません</option>}
+                            {comfyVersion?.tags.map((tag) => <option key={tag} value={tag}>{tag}{tag === comfyVersion.latest ? '(最新)' : ''}{comfyVersion.currentIsTag && tag === comfyVersion.current ? '(現在)' : ''}</option>)}
+                          </select>
+                        </label>
+                        <div className='llm-folder-actions'>
+                          <button type='button' disabled={busy} title={busy ? '更新処理が実行中です' : 'GitHub から ComfyUI のリリースタグを取得します'} onClick={() => void checkComfyUpdates()}>{comfyUpdate.phase === 'checking' ? '確認中…' : '更新を確認'}</button>
+                          <button type='button' className='primary' disabled={Boolean(updateDisabledReason)} title={updateDisabledReason || `ComfyUI を停止し、${comfyTargetTag} へ切り替えて requirements を入れ直します`} onClick={() => void runComfyUpdate()}>{comfyUpdate.phase === 'updating' ? '更新中…' : comfyTargetTag ? `${comfyTargetTag} へ切り替え` : '切り替え'}</button>
+                          <button type='button' onClick={() => void window.imageMixer.revealLlmLocation('logs')}>ログ</button>
+                        </div>
+                        <p className='llm-settings-note'>更新中は ComfyUI を停止し、完了後に自動で再起動します。生成キューが空のときに実行してください。古いタグを選ぶと元のバージョンへ戻せます。</p>
+                        {comfyUpdate.message && <p className={`llm-settings-note comfy-update-message ${comfyUpdate.phase}`}>{comfyUpdate.message}</p>}
+                        {comfyUpdate.log.length > 0 && <pre ref={comfyUpdateLogRef} className='comfy-update-log'>{comfyUpdate.log.join('\n')}</pre>}
+                        {comfyVersionError && comfyVersionError !== comfyUpdate.message && <div className='llm-settings-error comfy-update-error'>{comfyVersionError}</div>}
+                      </section>
+                    )
+                  })()}
                   {settingsTab === 'display' && (
                     <section className='llm-settings-section'>
                       <div className='llm-settings-section-title'>表示</div>

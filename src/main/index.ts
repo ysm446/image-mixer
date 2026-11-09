@@ -7,8 +7,9 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import * as os from 'node:os'
 import sharp from 'sharp'
 import { DEFAULT_LLM_CONFIG, LlamaServerManager } from './llamaServer'
+import { checkoutComfyTag, fetchComfyTags, readComfyVersionInfo } from './comfyUpdater'
 import { DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT, DEFAULT_TEXT_TRANSFORM_SYSTEM_PROMPT } from './types'
-import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationProgressEvent, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from './types'
+import type { BatchFolderSelection, BatchManifest, BatchPreparation, ComfyStatus, ComfyUpdateState, ComfyVersionInfo, CopiedSessionAsset, GenerateRequest, GeneratedImage, GenerationProgressEvent, GenerationStartedEvent, ImageAsset, ImageDescribeErrorEvent, ImageDescribeRequest, ImageDescribeStreamEvent, LibraryBootstrap, LibraryInfo, LlmConfig, LlmStatus, SessionRecord, SessionSnapshot, SystemResources, TextTransformErrorEvent, TextTransformRequest, TextTransformStreamEvent } from './types'
 
 const COMFY_URL = 'http://127.0.0.1:8189'
 const COMFY_PORT = '8189'
@@ -78,6 +79,9 @@ let mainWindow: BrowserWindow | null = null
 let comfyProcess: ChildProcess | null = null
 let comfyStopRequested = false
 let comfyStatus: ComfyStatus = { phase: 'stopped', message: 'ComfyUI is stopped', managed: false }
+const COMFY_UPDATE_LOG_LIMIT = 400
+let comfyUpdateState: ComfyUpdateState = { phase: 'idle', message: '', targetTag: null, log: [] }
+let comfyVersionCheckedAt: number | null = null
 let llamaServer: LlamaServerManager | null = null
 let llmConfig: LlmConfig = { ...DEFAULT_LLM_CONFIG }
 let isQuitting = false
@@ -797,6 +801,7 @@ async function waitForComfy(timeoutMs = 90_000): Promise<boolean> {
 
 async function startComfyUI(): Promise<void> {
   if (comfyStatus.phase === 'starting' || comfyStatus.phase === 'stopping') return
+  if (comfyUpdateState.phase === 'updating') return
   setComfyStatus({ phase: 'starting', message: 'Checking ComfyUI…', managed: comfyProcess !== null })
   if (await isComfyReady()) {
     const managed = comfyProcess !== null
@@ -890,6 +895,82 @@ async function stopComfyUI(): Promise<void> {
   if (!exited && comfyProcess === process && !isQuitting) {
     setComfyStatus({ phase: 'error', message: 'Timed out while unloading ComfyUI', managed: true })
   }
+}
+
+function comfyDirectory(): string {
+  return join(projectRoot(), 'runtime', 'ComfyUI')
+}
+
+function isComfyUpdateBusy(): boolean {
+  return comfyUpdateState.phase === 'checking' || comfyUpdateState.phase === 'updating'
+}
+
+function setComfyUpdateState(patch: Partial<ComfyUpdateState>): void {
+  comfyUpdateState = { ...comfyUpdateState, ...patch }
+  mainWindow?.webContents.send('comfy:update-state-changed', comfyUpdateState)
+}
+
+async function checkComfyUpdates(): Promise<ComfyVersionInfo> {
+  if (isComfyUpdateBusy()) throw new Error('ComfyUI の更新処理が実行中です')
+  setComfyUpdateState({ phase: 'checking', message: '更新を確認しています…', targetTag: null, log: [] })
+  try {
+    const info = await fetchComfyTags(comfyDirectory())
+    comfyVersionCheckedAt = info.checkedAt
+    const upToDate = info.currentIsTag && info.current === info.latest
+    setComfyUpdateState({ phase: 'idle', message: upToDate ? '最新バージョンです' : info.latest ? `${info.latest} を利用できます` : '安定版のタグが見つかりません' })
+    return info
+  } catch (error) {
+    setComfyUpdateState({ phase: 'error', message: error instanceof Error ? error.message : String(error) })
+    throw error
+  }
+}
+
+// ComfyUI を止めて指定タグへ切り替え、requirements を入れ直す。起動中だった場合は更新後に再起動する。
+async function updateComfyUI(tag: string): Promise<ComfyVersionInfo> {
+  if (isComfyUpdateBusy()) throw new Error('ComfyUI の更新処理が実行中です')
+  if (generationJobs.size > 0) throw new Error('生成中または待機中のジョブがあります。完了してから更新してください')
+  if (comfyStatus.phase === 'starting' || comfyStatus.phase === 'stopping') throw new Error('ComfyUI の起動・停止が終わってから更新してください')
+  if (!comfyProcess && comfyStatus.phase === 'ready' && !comfyStatus.managed) throw new Error('外部で起動した ComfyUI に接続中のため更新できません。外部の ComfyUI を終了してください')
+
+  const root = projectRoot()
+  const pythonPath = join(root, '.venv', 'Scripts', 'python.exe')
+  try {
+    await access(pythonPath)
+  } catch {
+    throw new Error('.venv が見つかりません')
+  }
+
+  const wasRunning = comfyProcess !== null
+  await mkdir(join(dataRoot(), 'logs'), { recursive: true })
+  const logFile = createWriteStream(join(dataRoot(), 'logs', 'comfyui-update.log'), { flags: 'a' })
+  logFile.write(`\n===== ${new Date().toISOString()} update to ${tag} =====\n`)
+  const log = (line: string): void => {
+    logFile.write(`${line}\n`)
+    setComfyUpdateState({ log: [...comfyUpdateState.log, line].slice(-COMFY_UPDATE_LOG_LIMIT) })
+  }
+  setComfyUpdateState({ phase: 'updating', message: `${tag} へ更新しています…`, targetTag: tag, log: [] })
+  try {
+    if (wasRunning) {
+      log('ComfyUI を停止しています')
+      await stopComfyUI()
+      if (comfyProcess) throw new Error('ComfyUI を停止できませんでした')
+    }
+    setComfyStatus({ phase: 'stopped', message: 'Updating ComfyUI…', managed: false })
+    await checkoutComfyTag(comfyDirectory(), pythonPath, tag, log)
+    log(`${tag} への更新が完了しました`)
+    setComfyUpdateState({ phase: 'done', message: `ComfyUI を ${tag} へ更新しました` })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    log(message)
+    setComfyUpdateState({ phase: 'error', message })
+    if (!wasRunning) setComfyStatus({ phase: 'stopped', message: 'ComfyUI is stopped', managed: false })
+    throw error
+  } finally {
+    logFile.end()
+    if (wasRunning && !isQuitting) void startComfyUI()
+    else if (comfyStatus.message === 'Updating ComfyUI…') setComfyStatus({ phase: 'stopped', message: 'ComfyUI is stopped', managed: false })
+  }
+  return readComfyVersionInfo(comfyDirectory(), comfyVersionCheckedAt)
 }
 
 function createWindow(): void {
@@ -1190,6 +1271,7 @@ async function processGenerationQueue(): Promise<void> {
 
 function enqueueImageGeneration(request: GenerateRequest): Promise<GeneratedImage> {
   validateGenerateRequest(request)
+  if (comfyUpdateState.phase === 'updating') throw new Error('ComfyUI を更新中です。完了してから生成してください')
   const key = generationKey(request.sessionId, request.nodeId)
   if (generationJobs.has(key)) throw new Error('This node is already queued or generating an image')
 
@@ -1447,6 +1529,10 @@ function registerIpc(): void {
     await stopComfyUI()
     return comfyStatus
   })
+  ipcMain.handle('comfy:version-info', (): Promise<ComfyVersionInfo> => readComfyVersionInfo(comfyDirectory(), comfyVersionCheckedAt))
+  ipcMain.handle('comfy:check-updates', (): Promise<ComfyVersionInfo> => checkComfyUpdates())
+  ipcMain.handle('comfy:update', (_event, tag: string): Promise<ComfyVersionInfo> => updateComfyUI(String(tag)))
+  ipcMain.handle('comfy:update-state', (): ComfyUpdateState => comfyUpdateState)
   ipcMain.handle('llm:status', (): LlmStatus => getLlamaServer().getStatus())
   ipcMain.handle('llm:load', () => getLlamaServer().load())
   ipcMain.handle('llm:stop', () => getLlamaServer().stop())

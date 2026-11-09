@@ -6,6 +6,28 @@ export interface ComfyStatus {
   managed: boolean
 }
 
+export interface ComfyVersionInfo {
+  /** git describe の結果(タグ上なら v0.37.0、そうでなければ v0.37.0-3-gabcdef)。 */
+  current: string | null
+  currentIsTag: boolean
+  commit: string | null
+  latest: string | null
+  /** 安定版タグ(vX.Y.Z)を新しい順に。 */
+  tags: string[]
+  dirty: boolean
+  /** リモートからタグを取得した時刻。未取得なら null。 */
+  checkedAt: number | null
+}
+
+export type ComfyUpdatePhase = 'idle' | 'checking' | 'updating' | 'done' | 'error'
+
+export interface ComfyUpdateState {
+  phase: ComfyUpdatePhase
+  message: string
+  targetTag: string | null
+  log: string[]
+}
+
 export type LlmPhase = 'loading' | 'ready' | 'unloading' | 'stopped' | 'error'
 
 export const DEFAULT_IMAGE_DESCRIBE_SYSTEM_PROMPT = `You are an expert image captioner for image-generation workflows. Describe only what is visibly present in the image as one detailed English image-generation prompt. Include the subject, appearance, pose, composition, environment, lighting, colors, camera perspective, and visual style when they are visible. Do not invent hidden facts. Return only the prompt without headings, commentary, or quotation marks.`
