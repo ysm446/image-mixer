@@ -1,7 +1,7 @@
 # 進捗
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-11-10 00:03
+更新日時: 2026-11-10 01:37
 
 ## 現在の状態
 
@@ -34,6 +34,8 @@ Electron + React Flowの動作版を実装済みです。Text、Image、Image Ge
 - ルートプロジェクトをGitリポジトリとして初期化済み。`runtime/ComfyUI`は独立したGitリポジトリとしてルート側の追跡対象から除外する。
 
 ## 完了済み
+
+- 生成モデルへ`P-H3-Image`(`ph3`)を追加した。ComfyUI v0.44.2のコアノード`PH3ImageConditioning`を使い、`SamplerCustomAdvanced` + `ManualSigmas`(8ステップ固定)+ `BasicGuider`(CFGなし)で実行する。`applyRequest`は`KSampler`が無いワークフローに対応し、Seedを`RandomNoise`へ、Width × Heightを32の倍数で`PH3ImageConditioning`へ渡す。int8一式(約30GB)を共有フォルダへ配置しSHA-256を照合済み。8190番の検証用ComfyUIでt2i(768 / 1024 / 2048)と参照1枚・2枚の編集を目視確認した。短い編集指示だと被写体ごと描き直されるため、TIPSで保持対象の明記を案内している。公式のプロンプトアップサンプラーは未導入。アプリ(Electron)からの実行は未確認。詳細は [docs/reference/p-h3-image.md](../reference/p-h3-image.md)。
 
 - 設定画面の「ComfyUI」タブから同梱ComfyUIのバージョン確認・更新・ロールバックを行えるようにした(`src/main/comfyUpdater.ts`)。タグのみを`git fetch`し(ブランチは取得しない)、安定版タグを新しい順に最大20件と現在のタグを一覧表示する。切り替え時はアプリ管理のComfyUIを停止してcheckoutし、`.venv`で`pip install -r requirements.txt`を実行、失敗時は元のコミットへ戻す。torchは requirements で版指定されていないため既存のものが維持される。タグ取得と一覧表示は実リポジトリで確認済み(v0.37.0 → 最新 v0.44.2)。実際の切り替え(checkout + pip)はまだ未実施で、新バージョンでは既存ワークフローの回帰確認が必要。
 
