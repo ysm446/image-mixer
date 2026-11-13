@@ -1,7 +1,7 @@
 # 進捗
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-11-10 00:03
+更新日時: 2026-11-14 00:20
 
 ## 現在の状態
 
@@ -34,6 +34,8 @@ Electron + React Flowの動作版を実装済みです。Text、Image、Image Ge
 - ルートプロジェクトをGitリポジトリとして初期化済み。`runtime/ComfyUI`は独立したGitリポジトリとしてルート側の追跡対象から除外する。
 
 ## 完了済み
+
+- 生成モデルへ`MiniMax H3 Image`(`minimax-h3`)を追加した。同梱ComfyUIをv0.44.2からv0.45.3へ更新し(既存のQwen Rapid AIO / Krea 2 Turbo / Qwen Image 2.1のテキスト生成を回帰確認済み)、コアノード`MiniMaxH3ImageConditioning` + `KSampler`(6ステップ、CFG 1、negativeは`ConditioningZeroOut`)で実行する。`applyRequest`はWidth × Heightを32の倍数でノードへ渡し、Steps・CFGを固定する。int8拡散モデルとVAEを共有フォルダへ追加し、テキストエンコーダは配置済みのQwen3-VL-32B nvfp4を流用(3ファイルともSHA-256照合済み)。8190番の検証用ComfyUIでt2i(1024 / 2048 / 2560 × 1440)と参照1枚・2枚の編集を目視確認した。seedによって編集結果が過剰シャープになることがある。公式のプロンプト拡張は未導入。アプリ(Electron)からの実行は未確認。詳細は [docs/reference/minimax-h3-image.md](../reference/minimax-h3-image.md)。
 
 - 設定画面の「ComfyUI」タブから同梱ComfyUIのバージョン確認・更新・ロールバックを行えるようにした(`src/main/comfyUpdater.ts`)。タグのみを`git fetch`し(ブランチは取得しない)、安定版タグを新しい順に最大20件と現在のタグを一覧表示する。切り替え時はアプリ管理のComfyUIを停止してcheckoutし、`.venv`で`pip install -r requirements.txt`を実行、失敗時は元のコミットへ戻す。torchは requirements で版指定されていないため既存のものが維持される。タグ取得と一覧表示は実リポジトリで確認済み(v0.37.0 → 最新 v0.44.2)。実際の切り替え(checkout + pip)はまだ未実施で、新バージョンでは既存ワークフローの回帰確認が必要。
 

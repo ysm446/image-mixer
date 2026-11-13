@@ -1,9 +1,15 @@
 # Changelog
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-11-10 00:03
+更新日時: 2026-11-14 00:20
 
 ## 未リリース
+
+### 2026-11-14 00:20
+
+- 生成モデルに`MiniMax H3 Image`(`minimax-h3`)を追加した。MiniMax公式の生成・編集統合モデルで、テキスト生成と画像編集(参照画像最大3枚、Image 1が編集対象)を行う(`workflows/MiniMax-H3-Image-Generate.json` / `workflows/MiniMax-H3-Image.json`)。プロンプトでは参照画像を`<Picture 1>`〜`<Picture 3>`と呼ぶ。6ステップ・CFG 1固定のため、ノードのSteps・CFGは使わない。ComfyUI v0.45.0以降が必要。
+- 同梱ComfyUIをv0.45.3へ更新した。
+- 仕様書 [docs/reference/minimax-h3-image.md](reference/minimax-h3-image.md) を追加した。
 
 ### 2026-11-10 00:03
 

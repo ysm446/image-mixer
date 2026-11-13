@@ -43,7 +43,7 @@ ComfyUIの内部ワークフローを直接編集するのではなく、素材�
 - ComfyUI node: `TextEncodeQwenImageEditPlus`
 - ComfyUI address: `127.0.0.1:8189`
 
-Model設定ではKrea 2 Turbo([docs/reference/krea2.md](docs/reference/krea2.md))とQwen Image 2.1([docs/reference/qwen-image-2.1.md](docs/reference/qwen-image-2.1.md)、ComfyUI 0.37.0以降が必要)も選べます。
+Model設定ではKrea 2 Turbo([docs/reference/krea2.md](docs/reference/krea2.md))、Qwen Image 2.1([docs/reference/qwen-image-2.1.md](docs/reference/qwen-image-2.1.md)、ComfyUI 0.37.0以降が必要)、MiniMax H3 Image([docs/reference/minimax-h3-image.md](docs/reference/minimax-h3-image.md)、ComfyUI 0.45.0以降が必要)も選べます。同梱ComfyUIは設定画面の「ComfyUI」タブから更新できます。
 
 ワークフローはComfyUIのAPI形式です。画面保存形式のJSONはそのまま実行できません。ComfyUIで編集した場合は、`Export (API)`で保存した内容に置き換えてください。
 
