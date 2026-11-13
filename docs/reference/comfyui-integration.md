@@ -1,11 +1,11 @@
 # ComfyUI 連携仕様
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-11-10 01:37
+更新日時: 2026-09-23 02:29
 
 ## 対象
 
-- ComfyUI: `runtime/ComfyUI`、調査時点 0.30.0。2026-09-23にQwen Image 2.1対応のためv0.37.0へ更新。2026-11にP-H3-Image対応のため、設定画面の「ComfyUI」タブからv0.44.2へ更新。
+- ComfyUI: `runtime/ComfyUI`、調査時点 0.30.0。2026-09-23にQwen Image 2.1対応のためv0.37.0へ更新。
 - workflow UI 保存版: `workflows/Qwen-Rapid-AIO.json`。
 - 画像生成用workflow: `workflows/Qwen-Rapid-AIO-Generate.json`。
 - checkpoint: `Qwen-Rapid-AIO-NSFW-v23.safetensors`。

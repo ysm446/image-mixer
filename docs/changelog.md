@@ -1,14 +1,9 @@
 # Changelog
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-11-10 01:37
+更新日時: 2026-11-10 00:03
 
 ## 未リリース
-
-### 2026-11-10 01:37
-
-- 生成モデルに`P-H3-Image`(`ph3`)を追加した。MiniMax-H3由来の生成・編集統合モデルで、テキスト生成と画像編集(参照画像最大3枚、Image 1が編集対象)を行う(`workflows/P-H3-Image-Generate.json` / `workflows/P-H3-Image.json`)。プロンプトでは参照画像を`<Picture 1>`〜`<Picture 3>`と呼ぶ。8ステップ固定・CFGなしのため、ノードのSteps・CFGは使わない。ComfyUI v0.44.0以降が必要。
-- 仕様書 [docs/reference/p-h3-image.md](reference/p-h3-image.md) を追加した。
 
 ### 2026-11-10 00:03
 

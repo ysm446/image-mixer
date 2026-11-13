@@ -1,7 +1,7 @@
 # Image Mixer の目標
 
 作成日時: 2026-08-05 22:27
-更新日時: 2026-11-10 01:37
+更新日時: 2026-09-23 02:29
 
 ## プロジェクトの目的
 
@@ -27,7 +27,7 @@ Image Mixer は、複数の画像と編集指示をノードグラフ上で組�
 - 生成ノード単位で prompt、出力サイズ、seed、steps、CFG、sampler、scheduler、denoise、生成枚数を設定できる。
 - `workflows/` の API 形式ワークフローをテンプレートとして読み込み、アプリの設定値を安全に差し替えて ComfyUI へ送信できる。
 - `Qwen-Rapid-AIO-NSFW-v23.safetensors` と `TextEncodeQwenImageEditPlus` を使い、最大3枚の参照画像から画像編集を実行できる。
-- 生成ノードのModel設定でQwen Rapid AIO、Krea 2 Turbo(キャラクター維持編集)、Krea 2 Turbo (Style)(画風参照)、Qwen Image 2.1(生成・編集統合)、P-H3-Image(生成・編集統合)をノード単位で切り替えられる。Model欄の下に選択中モデルの使い方TIPSを表示する。詳細は [docs/reference/krea2.md](../reference/krea2.md) / [docs/reference/qwen-image-2.1.md](../reference/qwen-image-2.1.md) / [docs/reference/p-h3-image.md](../reference/p-h3-image.md)。
+- 生成ノードのModel設定でQwen Rapid AIO、Krea 2 Turbo(キャラクター維持編集)、Krea 2 Turbo (Style)(画風参照)、Qwen Image 2.1(生成・編集統合)をノード単位で切り替えられる。Model欄の下に選択中モデルの使い方TIPSを表示する。詳細は [docs/reference/krea2.md](../reference/krea2.md) / [docs/reference/qwen-image-2.1.md](../reference/qwen-image-2.1.md)。
 - 実行待ち、実行中、完了、失敗、キャンセルをノード上で確認できる。
 - 生成中はリアルタイムの経過時間を表示し、結果保存または失敗後も確定した生成時間を生成ノードで確認できる。
 - 生成結果をクリップボードへ画像としてコピーし、任意の保存先へ書き出せる。
@@ -41,7 +41,7 @@ Image Mixer は、複数の画像と編集指示をノードグラフ上で組�
 
 - Windows ローカル環境での単一ユーザー利用。
 - 1つの ComfyUI サーバーと1つの固定ワークフローテンプレート。
-- 画像入力ノード、モデル非依存の`Image Generate`ノード、生成結果ノード。実行モデルはノード単位でQwen Rapid AIO、Krea 2 Turbo、Qwen Image 2.1、P-H3-Imageから選択する(既定はQwen Rapid AIO)。
+- 画像入力ノード、モデル非依存の`Image Generate`ノード、生成結果ノード。実行モデルはノード単位でQwen Rapid AIO、Krea 2 Turbo、Qwen Image 2.1から選択する(既定はQwen Rapid AIO)。
 - 生成ノードにつき最大3枚の画像入力。
 - Textノードを生成ノードへ接続し、Textノードの本文をComfyUIへ送信する。
 - Image Describeノードへ画像を接続し、Local LLMがストリーミング生成した説明テキストをTEXT出力として画像生成へ利用できる。
